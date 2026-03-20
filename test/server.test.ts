@@ -11,6 +11,7 @@ import { JobManager } from '../src/job-manager.js';
 import { PodController } from '../src/pod-controller.js';
 import { PodRegistry } from '../src/registry.js';
 import { SchedulerRouter } from '../src/router.js';
+import type { RuntimeInspector } from '../src/runtime-inspector.js';
 import type { JobRequest, PodManifest } from '../src/types.js';
 import { testManifests } from './helpers.js';
 
@@ -24,6 +25,40 @@ class RecordingAdapter {
     };
   }
 }
+
+const fakeRuntimeInspector: RuntimeInspector = {
+  inspect(manifests) {
+    const containersByName = new Map([
+      [
+        'asmo-whisper',
+        {
+          name: 'asmo-whisper',
+          names: ['asmo-whisper'],
+          image: 'docker.io/library/asmo-whisper:latest',
+          state: 'running',
+          status: 'Up 5 minutes',
+          ports: [
+            {
+              hostIp: '0.0.0.0',
+              hostPort: 8001,
+              containerPort: 8001,
+              protocol: 'tcp'
+            }
+          ]
+        }
+      ]
+    ]);
+
+    const hasWhisper = manifests.some((manifest) => manifest.id === 'whisper');
+
+    return {
+      backend: 'podman',
+      available: true,
+      error: hasWhisper ? undefined : 'unexpected test fixture state',
+      containersByName
+    };
+  }
+};
 
 const fixtureRoot = mkdtempSync(path.join(os.tmpdir(), 'asmo-pod-orch-fixtures-'));
 cpSync(path.resolve(process.cwd(), 'examples'), path.join(fixtureRoot, 'examples'), { recursive: true });
@@ -62,7 +97,8 @@ const { app } = buildApp({
   jobManager,
   projectRoot: fixtureRoot,
   managedPackagesRoot,
-  installedPackageStore
+  installedPackageStore,
+  runtimeInspector: fakeRuntimeInspector
 });
 
 afterAll(async () => {
@@ -242,11 +278,30 @@ describe('HTTP API', () => {
     expect(response.statusCode).toBe(200);
 
     const body = response.json();
+    expect(body.runtime.inspection).toEqual({
+      backend: 'podman',
+      available: true,
+      error: null
+    });
     expect(body.runtime.summary.totalPods).toBe(3);
+    expect(body.runtime.summary.observedContainers).toBe(1);
     expect(body.runtime.pods.find((pod: { podId: string }) => pod.podId === 'whisper').container).toEqual({
-      declaredName: null,
-      inferredFrom: null,
-      detection: 'manifest-hint'
+      declaredName: 'asmo-whisper',
+      name: 'asmo-whisper',
+      names: ['asmo-whisper'],
+      image: 'docker.io/library/asmo-whisper:latest',
+      state: 'running',
+      status: 'Up 5 minutes',
+      ports: [
+        {
+          hostIp: '0.0.0.0',
+          hostPort: 8001,
+          containerPort: 8001,
+          protocol: 'tcp'
+        }
+      ],
+      inferredFrom: 'startup.command',
+      detection: 'podman'
     });
     expect(body.packages.summary.installedPackages).toBe(3);
     expect(body.packages.summary.registryAliases).toBe(3);
@@ -263,8 +318,10 @@ describe('HTTP API', () => {
     const runtimeResponse = await app.inject({ method: 'GET', url: '/status/runtime' });
     expect(runtimeResponse.statusCode).toBe(200);
     const runtimeBody = runtimeResponse.json();
+    expect(runtimeBody.inspection.available).toBe(true);
     expect(runtimeBody.summary.runningPods).toBeGreaterThanOrEqual(1);
     expect(runtimeBody.pods[0].runtime.baseUrl).toContain('http://127.0.0.1:');
+    expect(runtimeBody.pods.find((pod: { podId: string }) => pod.podId === 'comfyapi').container.detection).toBe('podman-miss');
 
     const packagesResponse = await app.inject({ method: 'GET', url: '/status/packages' });
     expect(packagesResponse.statusCode).toBe(200);

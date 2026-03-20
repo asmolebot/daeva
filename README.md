@@ -289,7 +289,7 @@ The installed metadata store is currently a small JSON file under `.data/install
 Return a combined observability snapshot for the current orchestrator process.
 
 Response sections:
-- `runtime` — orchestrator-tracked pod lifecycle state, runtime URLs, and best-effort container name hints derived from manifest commands when available
+- `runtime` — orchestrator-tracked pod lifecycle state plus best-effort live Podman container inspection (with graceful manifest-hint fallback when Podman is unavailable)
 - `packages` — installed packages plus registry alias/index summary
 - `scheduler` — queue depth, processing flag, and exclusivity-group occupancy
 - `jobs` — recent in-memory job history summary
@@ -303,11 +303,17 @@ Example response shape:
 
 ```json
 {
+  "inspection": {
+    "backend": "podman",
+    "available": true,
+    "error": null
+  },
   "summary": {
     "totalPods": 3,
     "runningPods": 1,
     "busyPods": 0,
-    "exclusivityGroups": 1
+    "exclusivityGroups": 1,
+    "observedContainers": 1
   },
   "pods": [
     {
@@ -329,15 +335,28 @@ Example response shape:
       },
       "container": {
         "declaredName": "asmo-whisper",
+        "name": "asmo-whisper",
+        "names": ["asmo-whisper"],
+        "image": "docker.io/library/asmo-whisper:latest",
+        "state": "running",
+        "status": "Up 5 minutes",
+        "ports": [
+          {
+            "hostIp": "0.0.0.0",
+            "hostPort": 8001,
+            "containerPort": 8001,
+            "protocol": "tcp"
+          }
+        ],
         "inferredFrom": "startup.command",
-        "detection": "manifest-hint"
+        "detection": "podman"
       }
     }
   ]
 }
 ```
 
-Important nuance: this is currently the orchestrator's view of runtime state plus manifest-derived container hints. It is **not** yet a live Podman inspection surface.
+When Podman is available, `/status/runtime` now uses `podman ps -a --format json` to surface real container visibility (`name`, `image`, `state`, `status`, `ports`) for declared manifest container names. If Podman is unavailable or a container is not present, the API degrades cleanly back to manifest-derived hints instead of failing the status surface.
 
 ### `GET /status/packages`
 Return installed package metadata together with registry alias/index visibility.

@@ -15,6 +15,7 @@ import {
   buildSchedulerStatus,
   buildStatusSnapshot
 } from './status.js';
+import type { RuntimeInspector } from './runtime-inspector.js';
 import type { PodManifest } from './types.js';
 
 export interface AppDependencies {
@@ -25,6 +26,7 @@ export interface AppDependencies {
   installedPackageStore?: InstalledPackageStore;
   projectRoot?: string;
   managedPackagesRoot?: string;
+  runtimeInspector?: RuntimeInspector;
 }
 
 export const buildApp = (dependencies: AppDependencies = {}) => {
@@ -84,8 +86,10 @@ export const buildApp = (dependencies: AppDependencies = {}) => {
   app.get('/pods/aliases', async () => ({ aliases: registry.listAliases() }));
   app.get('/pods/installed', async () => ({ packages: installedPackageStore.list() }));
 
-  app.get('/status', async () => buildStatusSnapshot(registry, podController, jobManager, installedPackageStore));
-  app.get('/status/runtime', async () => buildRuntimeStatus(registry, podController));
+  app.get('/status', async () =>
+    buildStatusSnapshot(registry, podController, jobManager, installedPackageStore, dependencies.runtimeInspector)
+  );
+  app.get('/status/runtime', async () => buildRuntimeStatus(registry, podController, dependencies.runtimeInspector));
   app.get('/status/packages', async () => buildPackageStatus(registry, installedPackageStore));
   app.get('/status/scheduler', async () => buildSchedulerStatus(registry, podController, jobManager));
   app.get('/status/jobs/recent', async (request) => {

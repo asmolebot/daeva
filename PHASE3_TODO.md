@@ -91,7 +91,8 @@ The package should describe:
 - [ ] Add real install hooks for Podman-based pods
 - [ ] Improve host path/volume templating
 - [ ] Add support for optional service/quadlet metadata in package spec
-- [ ] Add richer runtime state detection from local Podman
+- [x] Add richer runtime state detection from local Podman
+  - `/status` and `/status/runtime` now attempt live Podman-backed inspection (`podman ps -a --format json`) for declared manifest container names, exposing observed name/image/state/status/ports with graceful fallback when Podman is absent or a container is missing.
 
 ### E. Better job contracts
 - [ ] Define first-class file input contract (path/upload/contentType/filename)

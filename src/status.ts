@@ -2,16 +2,11 @@ import type { JobManager } from './job-manager.js';
 import type { PodController } from './pod-controller.js';
 import type { PodRegistry } from './registry.js';
 import type { InstalledPackageStore } from './installed-package-store.js';
+import { PodmanRuntimeInspector, inferDeclaredContainerName } from './runtime-inspector.js';
+import type { RuntimeInspector } from './runtime-inspector.js';
 import type { JobRecord, PodManifest, PodRegistryIndexEntry } from './types.js';
 
-const extractContainerName = (command?: string): string | undefined => {
-  if (!command) {
-    return undefined;
-  }
-
-  const match = command.match(/(?:^|\s)--name\s+([^\s]+)/);
-  return match?.[1]?.replace(/^['"`]+|['"`]+$/g, '');
-};
+const defaultRuntimeInspector = new PodmanRuntimeInspector();
 
 const buildHealthUrl = (manifest: PodManifest): string | undefined => {
   if (!manifest.runtime.healthPath) {
@@ -32,38 +27,72 @@ const summarizeRegistrySources = (aliases: PodRegistryIndexEntry[]) => {
     .map(([kind, count]) => ({ kind, count }));
 };
 
-export const buildRuntimeStatus = (registry: PodRegistry, podController: PodController) => {
+export const buildRuntimeStatus = (
+  registry: PodRegistry,
+  podController: PodController,
+  runtimeInspector: RuntimeInspector = defaultRuntimeInspector
+) => {
   const manifests = registry.list();
-  const pods = podController.snapshot(manifests).map((entry) => ({
-    podId: entry.manifest.id,
-    nickname: entry.manifest.nickname,
-    status: entry.status,
-    currentJobId: entry.currentJobId ?? null,
-    lastStartedAt: entry.lastStartedAt ?? null,
-    lastStoppedAt: entry.lastStoppedAt ?? null,
-    exclusivityGroup: entry.manifest.exclusivityGroup ?? null,
-    capabilities: entry.manifest.capabilities,
-    runtime: {
-      kind: entry.manifest.runtime.kind,
-      baseUrl: entry.manifest.runtime.baseUrl,
-      submitPath: entry.manifest.runtime.submitPath,
-      healthPath: entry.manifest.runtime.healthPath ?? null,
-      healthUrl: buildHealthUrl(entry.manifest) ?? null,
-      method: entry.manifest.runtime.method ?? 'POST'
-    },
-    container: {
-      declaredName: extractContainerName(entry.manifest.startup?.command) ?? null,
-      inferredFrom: entry.manifest.startup?.command ? 'startup.command' : null,
-      detection: 'manifest-hint'
-    }
-  }));
+  const inspection = runtimeInspector.inspect(manifests);
+  const pods = podController.snapshot(manifests).map((entry) => {
+    const declaredName = inferDeclaredContainerName(entry.manifest.startup?.command) ?? null;
+    const container = declaredName ? inspection.containersByName.get(declaredName) : undefined;
+
+    return {
+      podId: entry.manifest.id,
+      nickname: entry.manifest.nickname,
+      status: entry.status,
+      currentJobId: entry.currentJobId ?? null,
+      lastStartedAt: entry.lastStartedAt ?? null,
+      lastStoppedAt: entry.lastStoppedAt ?? null,
+      exclusivityGroup: entry.manifest.exclusivityGroup ?? null,
+      capabilities: entry.manifest.capabilities,
+      runtime: {
+        kind: entry.manifest.runtime.kind,
+        baseUrl: entry.manifest.runtime.baseUrl,
+        submitPath: entry.manifest.runtime.submitPath,
+        healthPath: entry.manifest.runtime.healthPath ?? null,
+        healthUrl: buildHealthUrl(entry.manifest) ?? null,
+        method: entry.manifest.runtime.method ?? 'POST'
+      },
+      container: container
+        ? {
+            declaredName,
+            name: container.name,
+            names: container.names,
+            image: container.image,
+            state: container.state,
+            status: container.status,
+            ports: container.ports,
+            inferredFrom: 'startup.command',
+            detection: 'podman'
+          }
+        : {
+            declaredName,
+            name: declaredName,
+            names: declaredName ? [declaredName] : [],
+            image: null,
+            state: null,
+            status: null,
+            ports: [],
+            inferredFrom: entry.manifest.startup?.command ? 'startup.command' : null,
+            detection: inspection.available ? 'podman-miss' : 'manifest-hint'
+          }
+    };
+  });
 
   return {
+    inspection: {
+      backend: inspection.backend,
+      available: inspection.available,
+      error: inspection.error ?? null
+    },
     summary: {
       totalPods: pods.length,
       runningPods: pods.filter((pod) => pod.status === 'running').length,
       busyPods: pods.filter((pod) => pod.currentJobId !== null).length,
-      exclusivityGroups: [...new Set(pods.map((pod) => pod.exclusivityGroup).filter(Boolean))].length
+      exclusivityGroups: [...new Set(pods.map((pod) => pod.exclusivityGroup).filter(Boolean))].length,
+      observedContainers: pods.filter((pod) => pod.container.detection === 'podman').length
     },
     pods
   };
@@ -156,9 +185,10 @@ export const buildStatusSnapshot = (
   registry: PodRegistry,
   podController: PodController,
   jobManager: JobManager,
-  installedPackageStore: InstalledPackageStore
+  installedPackageStore: InstalledPackageStore,
+  runtimeInspector: RuntimeInspector = defaultRuntimeInspector
 ) => ({
-  runtime: buildRuntimeStatus(registry, podController),
+  runtime: buildRuntimeStatus(registry, podController, runtimeInspector),
   packages: buildPackageStatus(registry, installedPackageStore),
   scheduler: buildSchedulerStatus(registry, podController, jobManager),
   jobs: buildRecentJobStatus(jobManager)
