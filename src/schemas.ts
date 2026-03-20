@@ -80,6 +80,10 @@ export const jobRequestSchema = z.object({
   metadata: z.record(z.unknown()).optional()
 });
 
+export const podCreateRequestSchema = z.object({
+  alias: z.string().min(1)
+});
+
 export const registerManifestSchema = podManifestSchema;
 
 export const podPackageManifestSchema = z.object({

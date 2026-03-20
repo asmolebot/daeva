@@ -10,6 +10,7 @@ Current focus:
 - start/stop/switch behavior for pods that contend for the same GPU slot
 - Phase 3 package spec groundwork for portable pod packages
 - registry source modeling + local alias/index groundwork for future install flows
+- first alias-backed `POST /pods/create` planning flow for future package materialization
 
 This is intentionally not a giant orchestration cathedral. It's the practical first draft: coherent, testable, and easy to extend.
 
@@ -148,6 +149,83 @@ Example:
   "exclusivityGroup": "gpu-1"
 }
 ```
+
+### `GET /pods/aliases`
+List the currently known registry aliases loaded into `PodRegistry`.
+
+Example response shape:
+
+```json
+{
+  "aliases": [
+    {
+      "alias": "whisper",
+      "packageName": "asmo-whisper",
+      "podId": "whisper",
+      "source": {
+        "kind": "local-file",
+        "path": "examples/whisper-pod-package",
+        "packageManifestPath": "examples/whisper-pod-package/pod-package.json"
+      }
+    }
+  ]
+}
+```
+
+### `POST /pods/create`
+Resolve a named registry alias into the source that a future install/materialization flow should use.
+
+Current scope is intentionally narrow:
+- accepts a named alias only
+- resolves through the registry/index layer
+- returns the resolved source plus the next planned materialization action
+- does **not** yet clone/unpack/install the package
+
+Example request:
+
+```json
+{
+  "alias": "comfy"
+}
+```
+
+Example response shape:
+
+```json
+{
+  "create": {
+    "status": "resolved",
+    "alias": "comfy",
+    "registryEntry": {
+      "alias": "comfy",
+      "packageName": "asmo-comfy-community",
+      "podId": "comfyapi",
+      "source": {
+        "kind": "github-repo",
+        "repo": "asmoai/asmo-comfy-community-pod",
+        "ref": "main",
+        "packageManifestPath": "pod-package.json"
+      }
+    },
+    "resolvedSource": {
+      "kind": "github-repo",
+      "repo": "asmoai/asmo-comfy-community-pod",
+      "ref": "main",
+      "packageManifestPath": "pod-package.json"
+    },
+    "materialization": {
+      "status": "not-implemented",
+      "nextAction": "Clone asmoai/asmo-comfy-community-pod at ref main and read pod-package.json, validate the package manifest, then materialize it into managed storage.",
+      "summary": "Alias resolved successfully; package fetch/install is the next Phase 3 step."
+    }
+  },
+  "links": {
+    "aliases": "/pods/aliases"
+  }
+}
+```
+
+If the alias is unknown, the route returns `404` with the known aliases to help callers recover.
 
 ### `GET /pods/packages/upload-spec`
 Scaffolded endpoint describing the future remote package upload flow.
@@ -465,7 +543,7 @@ This first pass intentionally keeps a few things stubbed/small:
 - no persistent job store
 - no auth/rate limiting
 - pod lifecycle commands are described in manifests but not executed yet
-- package schema exists, but create/install flows are still future work
+- package schema exists, and `POST /pods/create` currently resolves aliases into a create plan, but clone/unpack/install persistence is still future work
 - only FIFO scheduling for now
 
 ## License

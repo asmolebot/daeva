@@ -1,4 +1,5 @@
 export * from './adapters.js';
+export * from './create-flow.js';
 export * from './errors.js';
 export * from './job-manager.js';
 export * from './manifest-loader.js';

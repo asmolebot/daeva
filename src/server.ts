@@ -1,11 +1,12 @@
 import Fastify from 'fastify';
 
+import { planCreateFromAlias } from './create-flow.js';
 import { NotFoundError } from './errors.js';
 import { JobManager } from './job-manager.js';
 import { PodController } from './pod-controller.js';
 import { PodRegistry } from './registry.js';
 import { SchedulerRouter } from './router.js';
-import { registerManifestSchema, jobRequestSchema } from './schemas.js';
+import { registerManifestSchema, jobRequestSchema, podCreateRequestSchema } from './schemas.js';
 import type { PodManifest } from './types.js';
 
 export interface AppDependencies {
@@ -34,6 +35,29 @@ export const buildApp = (dependencies: AppDependencies = {}) => {
     reply.code(201);
     return { pod: manifest };
   });
+
+  app.post('/pods/create', async (request, reply) => {
+    const payload = podCreateRequestSchema.parse(request.body);
+    const plan = planCreateFromAlias(registry, payload);
+
+    if (!plan) {
+      reply.code(404);
+      return {
+        error: `Unknown pod alias: ${payload.alias}`,
+        knownAliases: registry.listAliases().map((entry) => entry.alias)
+      };
+    }
+
+    reply.code(202);
+    return {
+      create: plan,
+      links: {
+        aliases: '/pods/aliases'
+      }
+    };
+  });
+
+  app.get('/pods/aliases', async () => ({ aliases: registry.listAliases() }));
 
   app.get('/pods/packages/upload-spec', async () => ({
     status: 'scaffolded',

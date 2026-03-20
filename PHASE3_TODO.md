@@ -66,10 +66,14 @@ The package should describe:
   - Added tests covering source parsing, index parsing, and alias resolution behavior.
 
 ### C. Create/install flow
-- [ ] Add `POST /pods/create` route
+- [x] Add `POST /pods/create` route
+  - Added a narrow planning endpoint in `src/server.ts` that validates `{ alias }`, resolves it through `PodRegistry`, and returns a structured create plan instead of pretending install exists.
+  - Added companion `GET /pods/aliases` route so clients can discover valid aliases before calling create.
 - [ ] Support create from Git URL
 - [ ] Support create from uploaded archive
-- [ ] Support create from named registry alias
+- [x] Support create from named registry alias
+  - Added `src/create-flow.ts` with `planCreateFromAlias()` so alias resolution + next-step messaging lives in one place and can later branch into real materialization handlers.
+  - Response now includes the resolved registry entry, normalized source descriptor, and a human/coherent `materialization.nextAction` string.
 - [ ] Unpack/clone package into managed local storage
 - [ ] Validate package manifest before install
 - [ ] Persist installed pod metadata

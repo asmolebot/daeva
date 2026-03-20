@@ -39,6 +39,48 @@ describe('HTTP API', () => {
     expect(body.pods).toHaveLength(3);
   });
 
+  it('lists registry aliases', async () => {
+    const response = await app.inject({ method: 'GET', url: '/pods/aliases' });
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.aliases.map((entry: { alias: string }) => entry.alias)).toEqual(['whisper', 'comfy', 'vision']);
+  });
+
+  it('resolves a named alias through POST /pods/create', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/pods/create',
+      payload: {
+        alias: 'comfy'
+      }
+    });
+
+    expect(response.statusCode).toBe(202);
+    const body = response.json();
+
+    expect(body.create.status).toBe('resolved');
+    expect(body.create.alias).toBe('comfy');
+    expect(body.create.registryEntry.packageName).toBe('asmo-comfy-community');
+    expect(body.create.resolvedSource.kind).toBe('github-repo');
+    expect(body.create.materialization.status).toBe('not-implemented');
+    expect(body.create.materialization.nextAction).toContain('Clone asmoai/asmo-comfy-community-pod');
+  });
+
+  it('returns a useful 404 when POST /pods/create receives an unknown alias', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/pods/create',
+      payload: {
+        alias: 'totally-not-real'
+      }
+    });
+
+    expect(response.statusCode).toBe(404);
+    const body = response.json();
+    expect(body.error).toContain('Unknown pod alias: totally-not-real');
+    expect(body.knownAliases).toEqual(['whisper', 'comfy', 'vision']);
+  });
+
   it('accepts a job and exposes its result', async () => {
     const createResponse = await app.inject({
       method: 'POST',
