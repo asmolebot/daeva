@@ -73,12 +73,14 @@ export const buildApp = (dependencies: AppDependencies = {}) => {
       return;
     }
 
-    if ('name' in error && error.name === 'ZodError') {
-      reply.code(400).send({ error: error.message });
+    if (typeof error === 'object' && error !== null && 'name' in error && error.name === 'ZodError') {
+      const message = 'message' in error && typeof error.message === 'string' ? error.message : 'Invalid request';
+      reply.code(400).send({ error: message });
       return;
     }
 
-    reply.code(500).send({ error: error.message });
+    const message = error instanceof Error ? error.message : 'Internal server error';
+    reply.code(500).send({ error: message });
   });
 
   return { app, registry, podController, router, jobManager };

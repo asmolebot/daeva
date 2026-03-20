@@ -1,7 +1,7 @@
 import { SchedulingError } from './errors.js';
 import { PodController } from './pod-controller.js';
 import { PodRegistry } from './registry.js';
-import type { JobRequest, PodManifest } from './types.js';
+import type { JobRequest, PodCapability, PodManifest } from './types.js';
 
 export class SchedulerRouter {
   constructor(
@@ -39,7 +39,7 @@ export class SchedulerRouter {
     return runningCandidate ?? candidates[0];
   }
 
-  private inferCapability(type: string): JobRequest['capability'] {
+  private inferCapability(type: string): PodCapability {
     const lowered = type.toLowerCase();
     if (lowered.includes('transcrib') || lowered.includes('speech') || lowered.includes('audio')) {
       return 'speech-to-text';

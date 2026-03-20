@@ -1,8 +1,31 @@
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { buildApp } from '../src/server.js';
+import { JobManager } from '../src/job-manager.js';
+import { PodController } from '../src/pod-controller.js';
+import { PodRegistry } from '../src/registry.js';
+import { SchedulerRouter } from '../src/router.js';
+import type { JobRequest, PodManifest } from '../src/types.js';
+import { testManifests } from './helpers.js';
 
-const { app, jobManager } = buildApp();
+class RecordingAdapter {
+  async execute(manifest: PodManifest, request: JobRequest) {
+    return {
+      ok: true,
+      podId: manifest.id,
+      type: request.type,
+      echoedInput: request.input
+    };
+  }
+}
+
+const registry = new PodRegistry(testManifests());
+const podController = new PodController(registry.list());
+const router = new SchedulerRouter(registry, podController);
+const jobManager = new JobManager(registry, podController, router, {
+  adapter: new RecordingAdapter()
+});
+const { app } = buildApp({ registry, podController, router, jobManager });
 
 afterAll(async () => {
   await app.close();
@@ -22,7 +45,7 @@ describe('HTTP API', () => {
       url: '/jobs',
       payload: {
         type: 'transcribe-audio',
-        input: { audioUrl: 'file:///tmp/demo.wav' }
+        input: { text: 'demo' }
       }
     });
 

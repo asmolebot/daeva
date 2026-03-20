@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { PodController } from '../src/pod-controller.js';
 import { PodRegistry } from '../src/registry.js';
 import { SchedulerRouter } from '../src/router.js';
-
-const registry = new PodRegistry();
+import { testManifests } from './helpers.js';
 
 describe('SchedulerRouter', () => {
   it('routes image jobs to comfyapi by inferred capability', async () => {
+    const registry = new PodRegistry(testManifests());
     const controller = new PodController(registry.list());
     const router = new SchedulerRouter(registry, controller);
 
@@ -21,6 +21,7 @@ describe('SchedulerRouter', () => {
   });
 
   it('stops a conflicting pod in the same exclusivity group before starting another', async () => {
+    const registry = new PodRegistry(testManifests());
     const controller = new PodController(registry.list());
     const router = new SchedulerRouter(registry, controller);
     const comfy = registry.get('comfyapi');

@@ -5,6 +5,7 @@ import { JobManager } from '../src/job-manager.js';
 import { PodController } from '../src/pod-controller.js';
 import { PodRegistry } from '../src/registry.js';
 import { SchedulerRouter } from '../src/router.js';
+import { testManifests } from './helpers.js';
 
 class RecordingAdapter {
   readonly seen: Array<{ podId: string; type: string }> = [];
@@ -21,7 +22,7 @@ class RecordingAdapter {
 
 describe('JobManager', () => {
   it('processes queued jobs in order and stores results', async () => {
-    const registry = new PodRegistry();
+    const registry = new PodRegistry(testManifests());
     const controller = new PodController(registry.list());
     const router = new SchedulerRouter(registry, controller);
     const adapter = new RecordingAdapter();

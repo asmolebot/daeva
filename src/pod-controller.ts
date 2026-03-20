@@ -1,6 +1,11 @@
+import { exec as execCb } from 'node:child_process';
+import { promisify } from 'node:util';
+
 import { SchedulingError } from './errors.js';
 import type { PodLifecycleStatus, PodManifest } from './types.js';
 import { sleep } from './utils.js';
+
+const exec = promisify(execCb);
 
 interface PodRuntimeState {
   status: PodLifecycleStatus;
@@ -50,8 +55,15 @@ export class PodController {
       return;
     }
 
+    if (await this.isHealthy(manifest)) {
+      state.status = 'running';
+      state.lastStartedAt = new Date().toISOString();
+      return;
+    }
+
     state.status = 'starting';
-    await sleep(manifest.startup?.simulatedDelayMs ?? 0);
+    await this.runLifecycleCommand(manifest.startup);
+    await this.waitForHealth(manifest);
     state.status = 'running';
     state.lastStartedAt = new Date().toISOString();
   }
@@ -67,7 +79,7 @@ export class PodController {
     }
 
     state.status = 'stopping';
-    await sleep(manifest.shutdown?.simulatedDelayMs ?? 0);
+    await this.runLifecycleCommand(manifest.shutdown);
     state.status = 'stopped';
     state.lastStoppedAt = new Date().toISOString();
   }
@@ -114,5 +126,51 @@ export class PodController {
     }
 
     return state;
+  }
+
+  private async runLifecycleCommand(step?: PodManifest['startup'] | PodManifest['shutdown']): Promise<void> {
+    if (!step) return;
+    if (step.command) {
+      await exec(step.command, {
+        cwd: step.cwd,
+        env: step.env ? { ...process.env, ...step.env } : process.env
+      });
+    }
+    if (step.simulatedDelayMs) {
+      await sleep(step.simulatedDelayMs);
+    }
+  }
+
+  private async waitForHealth(manifest: PodManifest): Promise<void> {
+    const healthPath = manifest.runtime.healthPath;
+    if (!healthPath) return;
+
+    const timeoutMs = 15000;
+    const intervalMs = 500;
+    const deadline = Date.now() + timeoutMs;
+    const url = `${manifest.runtime.baseUrl}${healthPath}`;
+
+    while (Date.now() < deadline) {
+      if (await this.isHealthy(manifest)) {
+        return;
+      }
+      await sleep(intervalMs);
+    }
+
+    throw new SchedulingError(`Health check did not pass for pod ${manifest.id} at ${url}`);
+  }
+
+  private async isHealthy(manifest: PodManifest): Promise<boolean> {
+    const healthPath = manifest.runtime.healthPath;
+    if (!healthPath) {
+      return true;
+    }
+
+    try {
+      const response = await fetch(`${manifest.runtime.baseUrl}${healthPath}`, { method: 'GET' });
+      return response.ok;
+    } catch {
+      return false;
+    }
   }
 }
