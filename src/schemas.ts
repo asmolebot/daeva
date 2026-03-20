@@ -55,6 +55,14 @@ export const registrySourceSchema = z.discriminatedUnion('kind', [
     packageManifestPath: z.string().min(1).optional()
   }),
   z.object({
+    kind: z.literal('uploaded-archive'),
+    filename: z.string().min(1),
+    archiveBase64: z.string().min(1),
+    contentType: z.string().min(1).optional(),
+    subpath: z.string().min(1).optional(),
+    packageManifestPath: z.string().min(1).optional()
+  }),
+  z.object({
     kind: z.literal('registry-index'),
     indexUrl: z.string().url(),
     alias: z.string().min(1)
@@ -90,7 +98,7 @@ export const jobRequestSchema = z.object({
 export const podCreateRequestSchema = z.object({
   alias: z.string().min(1).optional(),
   source: registrySourceSchema.refine((source) => source.kind !== 'registry-index', {
-    message: 'Direct create only supports local-file, github-repo, or git-repo sources'
+    message: 'Direct create only supports local-file, github-repo, git-repo, or uploaded-archive sources'
   }).optional()
 }).superRefine((value, ctx) => {
   if (!value.alias && !value.source) {

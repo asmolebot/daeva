@@ -35,6 +35,15 @@ cpSync(path.join(fixtureRoot, 'examples', 'whisper-pod-package'), path.join(gitR
 execFileSync('git', ['-C', gitRepoRoot, 'add', '.'], { stdio: 'pipe' });
 execFileSync('git', ['-C', gitRepoRoot, '-c', 'user.name=Asmo', '-c', 'user.email=asmo@example.com', 'commit', '-m', 'fixture'], { stdio: 'pipe' });
 
+
+
+const archiveFixtureRoot = mkdtempSync(path.join(os.tmpdir(), 'asmo-pod-orch-archive-fixture-'));
+const archivePackageRoot = path.join(archiveFixtureRoot, 'archive-package');
+cpSync(path.join(fixtureRoot, 'examples', 'whisper-pod-package'), archivePackageRoot, { recursive: true });
+const tarGzPath = path.join(archiveFixtureRoot, 'whisper-package.tar.gz');
+execFileSync('tar', ['-czf', tarGzPath, '-C', archiveFixtureRoot, 'archive-package'], { stdio: 'pipe' });
+const archiveBase64 = readFileSync(tarGzPath).toString('base64');
+
 const installRoot = mkdtempSync(path.join(os.tmpdir(), 'asmo-pod-orch-installed-'));
 const storageFilePath = path.join(installRoot, 'installed-packages.json');
 const managedPackagesRoot = path.join(installRoot, 'materialized');
@@ -60,6 +69,7 @@ afterAll(async () => {
   await app.close();
   rmSync(fixtureRoot, { recursive: true, force: true });
   rmSync(gitFixtureRoot, { recursive: true, force: true });
+  rmSync(archiveFixtureRoot, { recursive: true, force: true });
   rmSync(installRoot, { recursive: true, force: true });
 });
 
@@ -136,6 +146,39 @@ describe('HTTP API', () => {
     expect(installedResponse.statusCode).toBe(200);
     const installedBody = installedResponse.json();
     expect(installedBody.packages.map((pkg: { alias: string }) => pkg.alias)).toEqual(['git-whisper', 'whisper']);
+  });
+
+
+
+  it('materializes an uploaded archive source through POST /pods/create and exposes installed metadata', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/pods/create',
+      payload: {
+        alias: 'archive-whisper',
+        source: {
+          kind: 'uploaded-archive',
+          filename: 'whisper-package.tar.gz',
+          archiveBase64,
+          subpath: 'archive-package',
+          packageManifestPath: 'pod-package.json'
+        }
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+
+    expect(body.create.alias).toBe('archive-whisper');
+    expect(body.create.resolvedSource.kind).toBe('uploaded-archive');
+    expect(body.create.materialization.status).toBe('installed');
+    expect(body.create.materialization.installedPackage.source.kind).toBe('uploaded-archive');
+    expect(body.create.materialization.installedPackage.manifest.pod.id).toBe('whisper');
+
+    const installedResponse = await app.inject({ method: 'GET', url: '/pods/installed' });
+    expect(installedResponse.statusCode).toBe(200);
+    const installedBody = installedResponse.json();
+    expect(installedBody.packages.map((pkg: { alias: string }) => pkg.alias)).toEqual(['archive-whisper', 'git-whisper', 'whisper']);
   });
 
   it('resolves a named registry-index alias through POST /pods/create without materializing it yet', async () => {

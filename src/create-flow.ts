@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,7 +15,8 @@ import type {
   LocalFileRegistrySource,
   PodRegistryIndexEntry,
   RegistryIndexRegistrySource,
-  RegistrySource
+  RegistrySource,
+  UploadedArchiveRegistrySource
 } from './types.js';
 
 export interface PodCreateRequest {
@@ -59,6 +60,8 @@ const describeSource = (source: RegistrySource): string => {
       return describeGithubRepoSource(source);
     case 'git-repo':
       return describeGitRepoSource(source);
+    case 'uploaded-archive':
+      return describeUploadedArchiveSource(source);
     case 'registry-index':
       return describeRegistryIndexSource(source);
   }
@@ -85,6 +88,13 @@ const describeGitRepoSource = (source: GitRepoRegistrySource): string => {
     ? ` and read ${source.packageManifestPath}`
     : '';
   return `Clone ${source.repoUrl}${refNote}${manifestNote}, validate the package manifest, then materialize it into managed storage.`;
+};
+
+const describeUploadedArchiveSource = (source: UploadedArchiveRegistrySource): string => {
+  const manifestNote = source.packageManifestPath
+    ? ` and read ${source.packageManifestPath}`
+    : '';
+  return `Unpack uploaded archive ${source.filename}${manifestNote}, validate the package manifest, then materialize it into managed storage.`;
 };
 
 const describeRegistryIndexSource = (source: RegistryIndexRegistrySource): string =>
@@ -178,6 +188,10 @@ const deriveAliasFromSource = (source: Exclude<RegistrySource, RegistryIndexRegi
     return basename.endsWith('.git') ? basename.slice(0, -4) : basename;
   }
 
+  if (source.kind === 'uploaded-archive') {
+    return source.filename.replace(/\.(zip|tar|tar\.gz|tgz)$/i, '') || 'uploaded-package';
+  }
+
   return path.basename(source.path);
 };
 
@@ -222,6 +236,70 @@ const cloneAndMaterializeGitPackage = (
   }
 };
 
+const writeUploadedArchive = (source: UploadedArchiveRegistrySource, archivePath: string) => {
+  const normalized = source.archiveBase64.includes(',')
+    ? source.archiveBase64.split(',').pop() ?? source.archiveBase64
+    : source.archiveBase64;
+  writeFileSync(archivePath, Buffer.from(normalized, 'base64'));
+};
+
+const unpackArchive = (archivePath: string, extractRoot: string) => {
+  if (/\.(tar\.gz|tgz)$/i.test(archivePath)) {
+    execFileSync('tar', ['-xzf', archivePath, '-C', extractRoot], { stdio: 'pipe' });
+    return;
+  }
+  if (/\.tar$/i.test(archivePath)) {
+    execFileSync('tar', ['-xf', archivePath, '-C', extractRoot], { stdio: 'pipe' });
+    return;
+  }
+  if (/\.zip$/i.test(archivePath)) {
+    execFileSync('unzip', ['-q', archivePath, '-d', extractRoot], { stdio: 'pipe' });
+    return;
+  }
+
+  throw new Error('Unsupported uploaded archive format. First pass supports .tar, .tar.gz, .tgz, and .zip.');
+};
+
+const materializeUploadedArchivePackage = (
+  registryEntry: PodRegistryIndexEntry,
+  source: UploadedArchiveRegistrySource,
+  options: CreateFromAliasOptions
+): MaterializedPodCreatePlan => {
+  const managedPackagesRoot = getManagedPackagesRoot(options);
+  const unpackRoot = mkdtempSync(path.join(os.tmpdir(), 'asmo-pod-upload-'));
+  const archivePath = path.join(unpackRoot, source.filename);
+  const extractedRoot = path.join(unpackRoot, 'extracted');
+  mkdirSync(extractedRoot, { recursive: true });
+
+  try {
+    writeUploadedArchive(source, archivePath);
+    unpackArchive(archivePath, extractedRoot);
+
+    const packageRoot = source.subpath ? path.join(extractedRoot, source.subpath) : extractedRoot;
+    const manifestPath = path.join(packageRoot, source.packageManifestPath ?? 'pod-package.json');
+    const manifest = parsePodPackageManifest(JSON.parse(readFileSync(manifestPath, 'utf8')));
+
+    const managedAliasPath = path.join(managedPackagesRoot, registryEntry.alias);
+    mkdirSync(managedPackagesRoot, { recursive: true });
+    cpSync(packageRoot, managedAliasPath, { recursive: true, force: true });
+
+    const materializedManifestPath = path.join(managedAliasPath, source.packageManifestPath ?? 'pod-package.json');
+
+    return persistInstalledPackage(
+      registryEntry,
+      manifest,
+      source,
+      managedAliasPath,
+      materializedManifestPath,
+      managedAliasPath,
+      options,
+      'Installed uploaded archive package'
+    );
+  } finally {
+    rmSync(unpackRoot, { recursive: true, force: true });
+  }
+};
+
 const materializeSource = (
   registryEntry: PodRegistryIndexEntry,
   source: Exclude<RegistrySource, RegistryIndexRegistrySource>,
@@ -233,6 +311,8 @@ const materializeSource = (
     case 'github-repo':
     case 'git-repo':
       return cloneAndMaterializeGitPackage(registryEntry, source, options);
+    case 'uploaded-archive':
+      return materializeUploadedArchivePackage(registryEntry, source, options);
   }
 };
 

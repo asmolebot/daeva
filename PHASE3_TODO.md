@@ -72,7 +72,9 @@ The package should describe:
 - [x] Support create from Git URL
   - `POST /pods/create` now accepts either a registry alias or a direct `{ source }` payload.
   - Added first-pass `git-repo` support for arbitrary Git URLs and activated install/materialization for existing `github-repo` aliases.
-- [ ] Support create from uploaded archive
+- [x] Support create from uploaded archive
+  - Added first-pass direct `uploaded-archive` support on `POST /pods/create` using JSON/base64 input, temp extraction, manifest validation, and the existing installed-package persistence flow.
+  - Scope stays intentionally narrow: `.tar`, `.tar.gz`, `.tgz`, and `.zip` extraction only; no multipart/streaming upload path yet.
 - [x] Support create from named registry alias
   - Added `src/create-flow.ts` with `planCreateFromAlias()` so alias resolution + next-step messaging lives in one place and can later branch into real materialization handlers.
   - Alias-based creates now either materialize/install (`local-file`, `github-repo`) or return a delegated plan (`registry-index`).
@@ -82,7 +84,7 @@ The package should describe:
 - [x] Validate package manifest before install
   - Local and Git materialization now read `pod-package.json` (or the source-provided manifest path) and validate it with the existing `podPackageManifestSchema` via `parsePodPackageManifest()` before persisting install metadata.
 - [x] Persist installed pod metadata
-  - Installed package metadata continues to live in `.data/installed-packages.json` with the same schema/store shape for local and Git-backed installs.
+  - Installed package metadata continues to live in `.data/installed-packages.json` with the same schema/store shape for local, Git-backed, and uploaded-archive installs.
 
 ### D. Runtime/install improvements
 - [ ] Split install/start/stop/build semantics more cleanly in manifests

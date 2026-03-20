@@ -22,6 +22,15 @@ cpSync(gitPackageWorktree, path.join(gitRepoRoot, 'package'), { recursive: true 
 execFileSync('git', ['-C', gitRepoRoot, 'add', '.'], { stdio: 'pipe' });
 execFileSync('git', ['-C', gitRepoRoot, '-c', 'user.name=Asmo', '-c', 'user.email=asmo@example.com', 'commit', '-m', 'fixture'], { stdio: 'pipe' });
 
+
+const archiveFixtureRoot = path.join(tempRoot, 'archive-fixture');
+const archivePackageRoot = path.join(archiveFixtureRoot, 'archive-package');
+mkdirSync(archiveFixtureRoot, { recursive: true });
+cpSync(path.resolve(process.cwd(), 'examples/whisper-pod-package'), archivePackageRoot, { recursive: true });
+const archivePath = path.join(archiveFixtureRoot, 'whisper-package.tar.gz');
+execFileSync('tar', ['-czf', archivePath, '-C', archiveFixtureRoot, 'archive-package'], { stdio: 'pipe' });
+const archiveBase64 = readFileSync(archivePath).toString('base64');
+
 afterAll(() => {
   rmSync(tempRoot, { recursive: true, force: true });
 });
@@ -101,6 +110,46 @@ describe('create flow planning', () => {
     expect(result.materialization.installedPackage.alias).toBe('git-whisper');
     expect(result.materialization.installedPackage.source.kind).toBe('git-repo');
     expect(result.materialization.installedPackage.materializedPath).toContain('git-materialized');
+    expect(readFileSync(result.materialization.installedPackage.packageManifestPath, 'utf8')).toContain('asmo-whisper');
+    expect(installedPackageStore.list()).toHaveLength(1);
+  });
+
+
+
+  it('materializes a direct uploaded-archive source request into managed storage', () => {
+    const registry = new PodRegistry();
+    const podController = new PodController(registry.list());
+    const installedPackageStore = new InstalledPackageStore({
+      storageFilePath: path.join(tempRoot, 'archive-installed-packages.json')
+    });
+
+    const result = createFromAlias(
+      {
+        alias: 'archive-whisper',
+        source: {
+          kind: 'uploaded-archive',
+          filename: 'whisper-package.tar.gz',
+          archiveBase64,
+          subpath: 'archive-package',
+          packageManifestPath: 'pod-package.json'
+        }
+      },
+      {
+        registry,
+        podController,
+        installedPackageStore,
+        managedPackagesRoot: path.join(tempRoot, 'archive-materialized')
+      }
+    );
+
+    expect(result.materialization.status).toBe('installed');
+    if (result.materialization.status !== 'installed') {
+      throw new Error('Expected installed materialization');
+    }
+
+    expect(result.materialization.installedPackage.alias).toBe('archive-whisper');
+    expect(result.materialization.installedPackage.source.kind).toBe('uploaded-archive');
+    expect(result.materialization.installedPackage.materializedPath).toContain('archive-materialized');
     expect(readFileSync(result.materialization.installedPackage.packageManifestPath, 'utf8')).toContain('asmo-whisper');
     expect(installedPackageStore.list()).toHaveLength(1);
   });

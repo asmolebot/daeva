@@ -120,6 +120,15 @@ export interface GitRepoRegistrySource {
   packageManifestPath?: string;
 }
 
+export interface UploadedArchiveRegistrySource {
+  kind: 'uploaded-archive';
+  filename: string;
+  archiveBase64: string;
+  contentType?: string;
+  subpath?: string;
+  packageManifestPath?: string;
+}
+
 export interface RegistryIndexRegistrySource {
   kind: 'registry-index';
   indexUrl: string;
@@ -130,6 +139,7 @@ export type RegistrySource =
   | LocalFileRegistrySource
   | GithubRepoRegistrySource
   | GitRepoRegistrySource
+  | UploadedArchiveRegistrySource
   | RegistryIndexRegistrySource;
 
 export interface PodRegistryIndexEntry {

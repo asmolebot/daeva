@@ -10,7 +10,7 @@ Current focus:
 - start/stop/switch behavior for pods that contend for the same GPU slot
 - Phase 3 package spec groundwork for portable pod packages
 - registry source modeling + local alias/index groundwork for package install flows
-- `POST /pods/create` now materializes validated `local-file`, `github-repo`, and direct `git-repo` packages into managed storage and records installed metadata
+- `POST /pods/create` now materializes validated `local-file`, `github-repo`, direct `git-repo`, and first-pass uploaded archive packages into managed storage and records installed metadata
 
 This is intentionally not a giant orchestration cathedral. It's the practical first draft: coherent, testable, and easy to extend.
 
@@ -178,9 +178,9 @@ Resolve a named registry alias into the source that a future install/materializa
 Current scope is intentionally narrow:
 - accepts either a named alias or a direct `source` descriptor
 - resolves aliases through the registry/index layer
-- **materializes and installs** `local-file`, `github-repo`, and direct `git-repo` sources immediately
+- **materializes and installs** `local-file`, `github-repo`, direct `git-repo`, and first-pass `uploaded-archive` sources immediately
 - still returns a planning response for delegated `registry-index` aliases
-- does **not** yet accept archive uploads
+- uploaded archives are currently accepted as JSON/base64 payloads rather than streaming multipart uploads
 
 Example alias request:
 
@@ -234,7 +234,25 @@ Example direct Git request:
 }
 ```
 
+Example direct uploaded archive request:
+
+```json
+{
+  "alias": "archive-whisper",
+  "source": {
+    "kind": "uploaded-archive",
+    "filename": "whisper-package.tar.gz",
+    "archiveBase64": "<base64 archive bytes>",
+    "subpath": "archive-package",
+    "packageManifestPath": "pod-package.json"
+  }
+}
+```
+
+
 For `github-repo` aliases and direct `git-repo` requests, the server performs a first-pass `git clone`, optionally checks out `ref`, reads the package manifest from `subpath`/`packageManifestPath`, validates it, then copies that package directory into managed storage under `.data/pod-packages/<alias>` before recording installed metadata.
+
+For direct `uploaded-archive` requests, the server accepts a JSON source descriptor containing `filename`, `archiveBase64`, and optional `subpath` / `packageManifestPath`. It writes the archive to a temp directory, unpacks a narrow first-pass set (`.tar`, `.tar.gz`, `.tgz`, `.zip`), validates the extracted `pod-package.json`, then copies the extracted package into the same managed storage / installed-metadata flow used by local and Git sources.
 
 Delegated `registry-index` aliases still return a planning response with `materialization.status: "resolved"` and a `nextAction` string.
 
@@ -509,6 +527,10 @@ Each alias can resolve to one of three source models:
 - `git-repo`
   - points at an arbitrary Git URL with optional `ref`, `subpath`, and `packageManifestPath`
   - useful for local fixtures, self-hosted Git, or non-GitHub repos while reusing the same materialization path
+- `uploaded-archive`
+  - points at a direct uploaded archive payload carried in the request as JSON/base64
+  - current first pass supports `.tar`, `.tar.gz`, `.tgz`, and `.zip` extraction
+  - useful for local clients that already have package bytes and just need a direct materialize/install call
 - `registry-index`
   - points at another registry index URL plus an alias to resolve there
   - useful for delegating from a local shorthand like `vision` to a broader remote catalog
@@ -576,7 +598,7 @@ Near-term:
 - health checks and pod warmup policies
 
 Planned packaging feature:
-- extend materialization from the current first-pass git/local flows to archive uploads and richer remote registry fetches
+- extend materialization from the current first-pass local/git/archive flows to richer remote registry fetches and better remote upload ergonomics
 - build on the installed package metadata store for richer lifecycle management
 - optionally build/install the pod on the local host
 
@@ -587,7 +609,7 @@ This first pass intentionally keeps a few things stubbed/small:
 - no persistent job store
 - no auth/rate limiting
 - pod lifecycle commands are described in manifests but not executed yet
-- `POST /pods/create` now fully materializes local packages plus first-pass GitHub/direct Git sources, but archive upload flows are still future work
+- `POST /pods/create` now fully materializes local packages, first-pass GitHub/direct Git sources, and first-pass uploaded archive sources, but archive uploads are still JSON/base64 only (no multipart/streaming yet)
 - only FIFO scheduling for now
 
 ## License
