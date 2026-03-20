@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 
 import { createFromAlias } from './create-flow.js';
-import { NotFoundError } from './errors.js';
+import { AppError, NotFoundError } from './errors.js';
 import { InstalledPackageStore } from './installed-package-store.js';
 import { JobManager } from './job-manager.js';
 import { PodController } from './pod-controller.js';
@@ -74,8 +74,16 @@ export const buildApp = (dependencies: AppDependencies = {}) => {
       if (error instanceof NotFoundError) {
         reply.code(404);
         return {
-          error: error.message,
-          knownAliases: registry.listAliases().map((entry) => entry.alias)
+          error: {
+            code: error.code,
+            type: error.type,
+            message: error.message,
+            retriable: error.retriable ?? false,
+            details: {
+              ...(error.details ?? {}),
+              knownAliases: registry.listAliases().map((entry) => entry.alias)
+            }
+          }
         };
       }
 
@@ -132,19 +140,36 @@ export const buildApp = (dependencies: AppDependencies = {}) => {
   });
 
   app.setErrorHandler((error, _request, reply) => {
-    if (error instanceof NotFoundError) {
-      reply.code(404).send({ error: error.message });
+    if (error instanceof AppError) {
+      reply.code(error.statusCode).send(error.toResponseBody());
       return;
     }
 
     if (typeof error === 'object' && error !== null && 'name' in error && error.name === 'ZodError') {
       const message = 'message' in error && typeof error.message === 'string' ? error.message : 'Invalid request';
-      reply.code(400).send({ error: message });
+      reply.code(400).send({
+        error: {
+          code: 'REQUEST_VALIDATION_ERROR',
+          type: 'validation',
+          message,
+          retriable: false,
+          details: {
+            issues: 'issues' in error ? error.issues : undefined
+          }
+        }
+      });
       return;
     }
 
     const message = error instanceof Error ? error.message : 'Internal server error';
-    reply.code(500).send({ error: message });
+    reply.code(500).send({
+      error: {
+        code: 'INTERNAL_ERROR',
+        type: 'internal',
+        message,
+        retriable: false
+      }
+    });
   });
 
   return { app, registry, podController, router, jobManager, installedPackageStore };

@@ -95,10 +95,15 @@ The package should describe:
   - `/status` and `/status/runtime` now attempt live Podman-backed inspection (`podman ps -a --format json`) for declared manifest container names, exposing observed name/image/state/status/ports with graceful fallback when Podman is absent or a container is missing.
 
 ### E. Better job contracts
-- [ ] Define first-class file input contract (path/upload/contentType/filename)
-- [ ] Define richer normalized result contract
-- [ ] Add explicit job validation per capability
-- [ ] Add better error payloads and job failure reasons
+- [x] Define first-class file input contract (path/upload/contentType/filename)
+  - Added `JobRequest.files[]` as the canonical attachment surface with `source: "path" | "upload"`, `field`, `filename`, `contentType`, `sizeBytes`, and per-file metadata.
+  - Kept it coherent for both same-host callers (`path`) and future remote clients (`uploadBase64`).
+- [x] Define richer normalized result contract
+  - Completed/failed jobs now store a normalized `result` envelope with `status`, selected pod/runtime info, resolved request contract summary, and structured output/error payloads.
+- [x] Add explicit job validation per capability
+  - Added early validation before queueing: prompt required for image generation; file-or-URL style input required for speech-to-text / OCR / vision jobs.
+- [x] Add better error payloads and job failure reasons
+  - Added typed app/job errors with `code`, `type`, `details`, and `retriable`; failed jobs now retain structured failure reasons instead of a bare string.
 
 ### F. Richer status
 - [x] Add endpoint for active runtime/container status

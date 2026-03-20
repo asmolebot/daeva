@@ -11,6 +11,7 @@ import { JobManager } from '../src/job-manager.js';
 import { PodController } from '../src/pod-controller.js';
 import { PodRegistry } from '../src/registry.js';
 import { SchedulerRouter } from '../src/router.js';
+import { inferCapabilityForJobType } from '../src/job-contracts.js';
 import type { RuntimeInspector } from '../src/runtime-inspector.js';
 import type { JobRequest, PodManifest } from '../src/types.js';
 import { testManifests } from './helpers.js';
@@ -18,10 +19,40 @@ import { testManifests } from './helpers.js';
 class RecordingAdapter {
   async execute(manifest: PodManifest, request: JobRequest) {
     return {
-      ok: true,
-      podId: manifest.id,
-      type: request.type,
-      echoedInput: request.input
+      status: 'succeeded' as const,
+      pod: {
+        id: manifest.id,
+        nickname: manifest.nickname,
+        runtime: {
+          kind: manifest.runtime.kind,
+          baseUrl: manifest.runtime.baseUrl,
+          submitPath: manifest.runtime.submitPath,
+          method: manifest.runtime.method ?? 'POST'
+        }
+      },
+      request: {
+        type: request.type,
+        capability: request.capability ?? inferCapabilityForJobType(request.type),
+        inputKeys: Object.keys(request.input),
+        preferredPodId: request.preferredPodId,
+        files: (request.files ?? []).map((file) => ({
+          field: file.field ?? 'file',
+          source: file.source,
+          filename: file.filename,
+          contentType: file.contentType,
+          path: file.source === 'path' ? file.path : undefined,
+          sizeBytes: file.sizeBytes,
+          metadata: file.metadata
+        }))
+      },
+      output: {
+        data: {
+          ok: true,
+          podId: manifest.id,
+          type: request.type,
+          echoedInput: request.input
+        }
+      }
     };
   }
 }
@@ -246,8 +277,28 @@ describe('HTTP API', () => {
 
     expect(response.statusCode).toBe(404);
     const body = response.json();
-    expect(body.error).toContain('Unknown pod alias: totally-not-real');
-    expect(body.knownAliases).toEqual(['whisper', 'comfy', 'vision']);
+    expect(body.error.message).toContain('Unknown pod alias: totally-not-real');
+    expect(body.error.details.knownAliases).toEqual(['whisper', 'comfy', 'vision']);
+  });
+
+  it('rejects invalid jobs with a structured validation payload', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/jobs',
+      payload: {
+        type: 'generate-image',
+        input: {}
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: 'JOB_VALIDATION_ERROR',
+        type: 'validation',
+        retriable: false
+      }
+    });
   });
 
   it('accepts a job and exposes its result', async () => {
@@ -256,7 +307,15 @@ describe('HTTP API', () => {
       url: '/jobs',
       payload: {
         type: 'transcribe-audio',
-        input: { text: 'demo' }
+        input: {},
+        files: [
+          {
+            source: 'path',
+            path: '/tmp/demo.wav',
+            filename: 'demo.wav',
+            contentType: 'audio/wav'
+          }
+        ]
       }
     });
 
@@ -270,7 +329,9 @@ describe('HTTP API', () => {
     expect(jobResponse.statusCode).toBe(200);
     expect(jobResponse.json().job.status).toBe('completed');
     expect(resultResponse.statusCode).toBe(200);
-    expect(resultResponse.json().result.podId).toBe('whisper');
+    expect(resultResponse.json().result.status).toBe('succeeded');
+    expect(resultResponse.json().result.pod.id).toBe('whisper');
+    expect(resultResponse.json().result.request.capability).toBe('speech-to-text');
   });
 
   it('exposes a coherent status snapshot across runtime, packages, scheduler, and recent jobs', async () => {

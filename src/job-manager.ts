@@ -1,14 +1,40 @@
 import { HttpPodAdapter, type PodAdapter } from './adapters.js';
-import { NotFoundError } from './errors.js';
+import { AppError, NotFoundError } from './errors.js';
+import { createFailedResult, inferCapabilityForJobType, validateJobRequest } from './job-contracts.js';
 import { PodController } from './pod-controller.js';
 import { PodRegistry } from './registry.js';
 import { SchedulerRouter } from './router.js';
-import type { JobRecord, JobRequest } from './types.js';
+import type { JobFailureInfo, JobRecord, JobRequest } from './types.js';
 import { nowIso, randomId } from './utils.js';
 
 export interface JobManagerOptions {
   adapter?: PodAdapter;
 }
+
+const serializeJobFailure = (error: unknown): JobFailureInfo => {
+  if (error instanceof AppError) {
+    return {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      retriable: error.retriable ?? false
+    };
+  }
+
+  if (error instanceof Error) {
+    return {
+      code: 'INTERNAL_ERROR',
+      message: error.message,
+      retriable: false
+    };
+  }
+
+  return {
+    code: 'INTERNAL_ERROR',
+    message: 'Unknown job failure',
+    retriable: false
+  };
+};
 
 export class JobManager {
   private readonly jobs = new Map<string, JobRecord>();
@@ -26,13 +52,15 @@ export class JobManager {
   }
 
   enqueue(request: JobRequest): JobRecord {
+    const capability = validateJobRequest(request);
     const now = nowIso();
     const job: JobRecord = {
       id: randomId('job'),
       createdAt: now,
       updatedAt: now,
       status: 'queued',
-      request
+      request,
+      resolvedCapability: capability
     };
 
     this.jobs.set(job.id, job);
@@ -62,15 +90,15 @@ export class JobManager {
   getJob(id: string): JobRecord {
     const job = this.jobs.get(id);
     if (!job) {
-      throw new NotFoundError(`Job not found: ${id}`);
+      throw new NotFoundError(`Job not found: ${id}`, { details: { jobId: id } });
     }
 
     return job;
   }
 
-  getResult(id: string): unknown {
+  getResult(id: string) {
     const job = this.getJob(id);
-    if (job.status !== 'completed') {
+    if (job.status !== 'completed' && job.status !== 'failed') {
       return null;
     }
 
@@ -103,21 +131,36 @@ export class JobManager {
       job.startedAt = startedAt;
       job.updatedAt = startedAt;
       job.selectedPodId = pod.id;
+      job.resolvedCapability = job.resolvedCapability ?? job.request.capability ?? inferCapabilityForJobType(job.request.type);
 
       this.podController.markJobStarted(pod.id, job.id);
       const result = await this.adapter.execute(pod, job.request);
       const completedAt = nowIso();
-      job.status = 'completed';
+      job.status = result.status === 'failed' ? 'failed' : 'completed';
       job.completedAt = completedAt;
       job.updatedAt = completedAt;
       job.result = result;
+      job.error = result.output.error
+        ? {
+            code: result.output.error.code,
+            message: result.output.error.message,
+            details: result.output.error.details,
+            retriable: result.output.error.retriable
+          }
+        : undefined;
       this.podController.markJobFinished(pod.id);
     } catch (error) {
       const failedAt = nowIso();
       job.status = 'failed';
       job.updatedAt = failedAt;
       job.completedAt = failedAt;
-      job.error = error instanceof Error ? error.message : 'Unknown job failure';
+      job.error = serializeJobFailure(error);
+      job.result = createFailedResult(
+        job.selectedPodId ? this.registry.get(job.selectedPodId) : undefined,
+        job.request,
+        job.resolvedCapability,
+        error
+      );
       if (job.selectedPodId) {
         this.podController.markJobFinished(job.selectedPodId);
       }

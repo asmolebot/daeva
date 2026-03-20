@@ -87,11 +87,33 @@ export const podRegistryIndexSchema = z.object({
   entries: z.array(podRegistryIndexEntrySchema).min(1)
 });
 
+const jobFileInputSchema = z.discriminatedUnion('source', [
+  z.object({
+    source: z.literal('path'),
+    path: z.string().min(1),
+    field: z.string().min(1).optional(),
+    filename: z.string().min(1).optional(),
+    contentType: z.string().min(1).optional(),
+    sizeBytes: z.number().int().nonnegative().optional(),
+    metadata: z.record(z.unknown()).optional()
+  }),
+  z.object({
+    source: z.literal('upload'),
+    uploadBase64: z.string().min(1),
+    field: z.string().min(1).optional(),
+    filename: z.string().min(1).optional(),
+    contentType: z.string().min(1).optional(),
+    sizeBytes: z.number().int().nonnegative().optional(),
+    metadata: z.record(z.unknown()).optional()
+  })
+]);
+
 export const jobRequestSchema = z.object({
   type: z.string().min(1),
   capability: podCapabilitySchema.optional(),
   preferredPodId: z.string().min(1).optional(),
   input: z.record(z.unknown()),
+  files: z.array(jobFileInputSchema).optional(),
   metadata: z.record(z.unknown()).optional()
 });
 

@@ -418,10 +418,75 @@ Example request:
 }
 ```
 
-Optional fields:
-- `capability`: explicitly force capability selection
-- `preferredPodId`: pin a specific pod
-- `metadata`: attach opaque caller metadata
+First-class job fields:
+- `type`: caller-defined job type used for capability inference when `capability` is omitted
+- `capability`: optional explicit capability override
+- `preferredPodId`: optional direct pod hint/pin
+- `input`: structured non-file parameters
+- `files`: optional first-class file attachments for local or remote clients
+- `metadata`: opaque caller metadata
+
+### Job file input contract
+
+`files[]` is now the canonical place for attachments instead of burying ad-hoc upload keys inside `input`.
+
+Supported file sources:
+- `source: "path"` — local host file path for same-machine callers
+- `source: "upload"` — base64 payload for remote/thin clients that do not share filesystem access
+
+Common file fields:
+- `field` — multipart field name to send to the pod (defaults to `file`)
+- `filename` — stable filename exposed to the downstream pod
+- `contentType` — MIME type hint
+- `sizeBytes` — optional caller-supplied size hint
+- `metadata` — arbitrary per-file metadata for future tracing/client use
+
+Local-path example:
+
+```json
+{
+  "type": "transcribe-audio",
+  "files": [
+    {
+      "source": "path",
+      "path": "/tmp/demo.wav",
+      "filename": "demo.wav",
+      "contentType": "audio/wav"
+    }
+  ],
+  "input": {}
+}
+```
+
+Remote-upload example:
+
+```json
+{
+  "type": "ocr-document",
+  "files": [
+    {
+      "source": "upload",
+      "field": "document",
+      "filename": "receipt.png",
+      "contentType": "image/png",
+      "uploadBase64": "<base64 bytes>",
+      "metadata": {
+        "page": 1,
+        "origin": "mobile-client"
+      }
+    }
+  ],
+  "input": {
+    "language": "en"
+  }
+}
+```
+
+Capability-specific validation now happens before queueing:
+- `image-generation` requires `input.prompt`
+- `speech-to-text` requires either `files[]` or audio-style fields like `audioUrl` / `audioBase64`
+- `ocr` requires either `files[]` or image/document URL/base64 input
+- `vision` requires either `files[]` or image/prompt context
 
 Response:
 
@@ -429,7 +494,8 @@ Response:
 {
   "job": {
     "id": "job_xxx",
-    "status": "queued"
+    "status": "queued",
+    "resolvedCapability": "image-generation"
   },
   "links": {
     "self": "/jobs/job_xxx",
@@ -448,8 +514,104 @@ Get a single job and its current state:
 - `completed`
 - `failed`
 
+Failed jobs now include a structured `error` object with:
+- `code`
+- `message`
+- `details`
+- `retriable`
+
 ### `GET /jobs/:jobId/result`
-Return the result payload once complete, otherwise `null`.
+Return the normalized result payload once complete/failed, otherwise `null`.
+
+Normalized completed result shape:
+
+```json
+{
+  "result": {
+    "status": "succeeded",
+    "pod": {
+      "id": "whisper",
+      "nickname": "Whisper",
+      "runtime": {
+        "kind": "http-service",
+        "baseUrl": "http://127.0.0.1:8001",
+        "submitPath": "/transcribe",
+        "method": "POST"
+      }
+    },
+    "request": {
+      "type": "transcribe-audio",
+      "capability": "speech-to-text",
+      "inputKeys": ["language"],
+      "files": [
+        {
+          "field": "file",
+          "source": "path",
+          "filename": "demo.wav",
+          "contentType": "audio/wav",
+          "path": "/tmp/demo.wav"
+        }
+      ]
+    },
+    "output": {
+      "data": {
+        "acceptedAt": "2026-03-20T22:00:00.000Z",
+        "submitUrl": "http://127.0.0.1:8001/transcribe",
+        "method": "POST",
+        "bodyKind": "form-data",
+        "response": {
+          "text": "hello world"
+        }
+      }
+    }
+  }
+}
+```
+
+Normalized failed result shape:
+
+```json
+{
+  "result": {
+    "status": "failed",
+    "request": {
+      "type": "transcribe-audio",
+      "capability": "speech-to-text",
+      "inputKeys": [],
+      "files": []
+    },
+    "output": {
+      "error": {
+        "code": "POD_REQUEST_ERROR",
+        "message": "Pod request failed (503 Service Unavailable) for whisper",
+        "details": {
+          "status": 503,
+          "podId": "whisper"
+        },
+        "retriable": true
+      }
+    }
+  }
+}
+```
+
+### Error payloads
+
+Top-level API errors now use a structured envelope instead of a bare string:
+
+```json
+{
+  "error": {
+    "code": "JOB_VALIDATION_ERROR",
+    "type": "validation",
+    "message": "image-generation jobs require input.prompt",
+    "details": {
+      "expected": ["input.prompt"]
+    },
+    "retriable": false
+  }
+}
+```
 
 ## Portable pod package spec
 

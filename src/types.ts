@@ -178,12 +178,91 @@ export interface InstalledPackageMetadataCollection {
   packages: InstalledPackageMetadata[];
 }
 
+export interface JobRequestFileBase {
+  field?: string;
+  filename?: string;
+  contentType?: string;
+  sizeBytes?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface JobRequestFilePath extends JobRequestFileBase {
+  source: 'path';
+  path: string;
+}
+
+export interface JobRequestFileUpload extends JobRequestFileBase {
+  source: 'upload';
+  uploadBase64: string;
+}
+
+export type JobFileInput = JobRequestFilePath | JobRequestFileUpload;
+
 export interface JobRequest {
   type: string;
   capability?: PodCapability;
   preferredPodId?: string;
   input: Record<string, unknown>;
+  files?: JobFileInput[];
   metadata?: Record<string, unknown>;
+}
+
+export interface JobCapabilityContract {
+  type: string;
+  capability: PodCapability;
+  inputKeys: string[];
+  preferredPodId?: string;
+  files: Array<{
+    field: string;
+    source: 'path' | 'upload';
+    filename?: string;
+    contentType?: string;
+    path?: string;
+    sizeBytes?: number;
+    metadata?: Record<string, unknown>;
+  }>;
+}
+
+export interface JobResultOutputFile {
+  url?: string;
+  path?: string;
+  filename?: string;
+  contentType?: string;
+  sizeBytes?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface JobCompletedResult {
+  status: 'succeeded' | 'failed';
+  pod?: {
+    id: string;
+    nickname: string;
+    runtime: {
+      kind: 'http-service';
+      baseUrl: string;
+      submitPath: string;
+      method: HttpMethod;
+    };
+  };
+  request?: JobCapabilityContract;
+  output: {
+    text?: string;
+    files?: JobResultOutputFile[];
+    data?: unknown;
+    error?: {
+      code: string;
+      message: string;
+      details?: Record<string, unknown>;
+      retriable: boolean;
+    };
+  };
+}
+
+export interface JobFailureInfo {
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+  retriable: boolean;
 }
 
 export interface JobRecord {
@@ -193,10 +272,11 @@ export interface JobRecord {
   status: JobStatus;
   request: JobRequest;
   selectedPodId?: string;
+  resolvedCapability?: PodCapability;
   startedAt?: string;
   completedAt?: string;
-  result?: unknown;
-  error?: string;
+  result?: JobCompletedResult;
+  error?: JobFailureInfo;
 }
 
 export interface RunContext {
