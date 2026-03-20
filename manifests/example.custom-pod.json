@@ -1,0 +1,31 @@
+{
+  "id": "vision-lora-worker",
+  "nickname": "Vision Lora Worker",
+  "description": "Example packaged manifest for a future uploaded pod.",
+  "capabilities": ["vision"],
+  "source": {
+    "homepage": "https://example.com/vision-lora-worker",
+    "readme": "https://example.com/vision-lora-worker/readme",
+    "repository": "https://github.com/example/vision-lora-worker"
+  },
+  "runtime": {
+    "kind": "http-service",
+    "baseUrl": "http://127.0.0.1:9200",
+    "healthPath": "/health",
+    "submitPath": "/jobs",
+    "method": "POST"
+  },
+  "startup": {
+    "command": "docker compose up -d vision-lora-worker",
+    "simulatedDelayMs": 150
+  },
+  "shutdown": {
+    "command": "docker compose stop vision-lora-worker",
+    "simulatedDelayMs": 75
+  },
+  "exclusivityGroup": "gpu-1",
+  "metadata": {
+    "packageManifestVersion": "1",
+    "futureUploadable": true
+  }
+}
