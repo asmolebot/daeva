@@ -1,0 +1,85 @@
+import Fastify from 'fastify';
+
+import { NotFoundError } from './errors.js';
+import { JobManager } from './job-manager.js';
+import { PodController } from './pod-controller.js';
+import { PodRegistry } from './registry.js';
+import { SchedulerRouter } from './router.js';
+import { registerManifestSchema, jobRequestSchema } from './schemas.js';
+import type { PodManifest } from './types.js';
+
+export interface AppDependencies {
+  registry?: PodRegistry;
+  podController?: PodController;
+  router?: SchedulerRouter;
+  jobManager?: JobManager;
+}
+
+export const buildApp = (dependencies: AppDependencies = {}) => {
+  const registry = dependencies.registry ?? new PodRegistry();
+  const podController = dependencies.podController ?? new PodController(registry.list());
+  const router = dependencies.router ?? new SchedulerRouter(registry, podController);
+  const jobManager = dependencies.jobManager ?? new JobManager(registry, podController, router);
+
+  const app = Fastify({ logger: false });
+
+  app.get('/health', async () => ({ ok: true }));
+
+  app.get('/pods', async () => ({ pods: jobManager.registrySnapshot() }));
+
+  app.post('/pods/register', async (request, reply) => {
+    const manifest = registerManifestSchema.parse(request.body) as PodManifest;
+    registry.register(manifest);
+    podController.syncManifest(manifest);
+    reply.code(201);
+    return { pod: manifest };
+  });
+
+  app.get('/pods/packages/upload-spec', async () => ({
+    status: 'scaffolded',
+    accepts: ['tarball', 'docker-context', 'init-scripts'],
+    plannedFields: ['manifest.json', 'Dockerfile', 'compose.yml', 'README.md'],
+    note: 'Future feature: remote clients will upload pod packages for registration.'
+  }));
+
+  app.post('/jobs', async (request, reply) => {
+    const payload = jobRequestSchema.parse(request.body);
+    const job = jobManager.enqueue(payload);
+    reply.code(202);
+    return {
+      job,
+      links: {
+        self: `/jobs/${job.id}`,
+        result: `/jobs/${job.id}/result`
+      }
+    };
+  });
+
+  app.get('/jobs', async () => ({ jobs: jobManager.listJobs() }));
+
+  app.get('/jobs/:jobId', async (request) => {
+    const params = request.params as { jobId: string };
+    return { job: jobManager.getJob(params.jobId) };
+  });
+
+  app.get('/jobs/:jobId/result', async (request) => {
+    const params = request.params as { jobId: string };
+    return { result: jobManager.getResult(params.jobId) };
+  });
+
+  app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof NotFoundError) {
+      reply.code(404).send({ error: error.message });
+      return;
+    }
+
+    if ('name' in error && error.name === 'ZodError') {
+      reply.code(400).send({ error: error.message });
+      return;
+    }
+
+    reply.code(500).send({ error: error.message });
+  });
+
+  return { app, registry, podController, router, jobManager };
+};
