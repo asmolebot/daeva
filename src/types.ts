@@ -232,6 +232,80 @@ export interface JobResultOutputFile {
   metadata?: Record<string, unknown>;
 }
 
+export interface TranscriptSegment {
+  startMs?: number;
+  endMs?: number;
+  text: string;
+  confidence?: number;
+  speaker?: string;
+}
+
+export interface DetectionBox {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+}
+
+export interface DetectionItem {
+  label: string;
+  confidence?: number;
+  text?: string;
+  box?: DetectionBox;
+  metadata?: Record<string, unknown>;
+}
+
+export interface GeneratedImageItem extends JobResultOutputFile {
+  width?: number;
+  height?: number;
+}
+
+export interface JobOutputError {
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+  retriable: boolean;
+}
+
+export interface JobOutputBase {
+  files?: JobResultOutputFile[];
+  raw?: unknown;
+  error?: JobOutputError;
+}
+
+export interface SpeechToTextJobOutput extends JobOutputBase {
+  kind: 'speech-to-text';
+  transcript?: {
+    text: string;
+    language?: string;
+    durationMs?: number;
+    segments?: TranscriptSegment[];
+  };
+}
+
+export interface OcrJobOutput extends JobOutputBase {
+  kind: 'ocr';
+  text?: string;
+  detections?: DetectionItem[];
+}
+
+export interface VisionJobOutput extends JobOutputBase {
+  kind: 'vision';
+  text?: string;
+  detections?: DetectionItem[];
+}
+
+export interface ImageGenerationJobOutput extends JobOutputBase {
+  kind: 'image-generation';
+  generatedImages?: GeneratedImageItem[];
+}
+
+export type JobOutput =
+  | SpeechToTextJobOutput
+  | OcrJobOutput
+  | VisionJobOutput
+  | ImageGenerationJobOutput;
+
 export interface JobCompletedResult {
   status: 'succeeded' | 'failed';
   pod?: {
@@ -245,17 +319,7 @@ export interface JobCompletedResult {
     };
   };
   request?: JobCapabilityContract;
-  output: {
-    text?: string;
-    files?: JobResultOutputFile[];
-    data?: unknown;
-    error?: {
-      code: string;
-      message: string;
-      details?: Record<string, unknown>;
-      retriable: boolean;
-    };
-  };
+  output: JobOutput;
 }
 
 export interface JobFailureInfo {

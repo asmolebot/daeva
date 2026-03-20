@@ -74,6 +74,7 @@ The package should describe:
   - Added first-pass `git-repo` support for arbitrary Git URLs and activated install/materialization for existing `github-repo` aliases.
 - [x] Support create from uploaded archive
   - Added first-pass direct `uploaded-archive` support on `POST /pods/create` using JSON/base64 input, temp extraction, manifest validation, and the existing installed-package persistence flow.
+  - Added first-pass hardening: reject absolute/traversal archive entries, reject extracted symlinks, and enforce clear compressed/extracted entry limits.
   - Scope stays intentionally narrow: `.tar`, `.tar.gz`, `.tgz`, and `.zip` extraction only; no multipart/streaming upload path yet.
 - [x] Support create from named registry alias
   - Added `src/create-flow.ts` with `planCreateFromAlias()` so alias resolution + next-step messaging lives in one place and can later branch into real materialization handlers.
@@ -100,8 +101,10 @@ The package should describe:
   - Kept it coherent for both same-host callers (`path`) and future remote clients (`uploadBase64`).
 - [x] Define richer normalized result contract
   - Completed/failed jobs now store a normalized `result` envelope with `status`, selected pod/runtime info, resolved request contract summary, and structured output/error payloads.
+  - Normalized outputs are now capability-shaped: `speech-to-text` -> `transcript`, `ocr`/`vision` -> `text` + `detections`, `image-generation` -> `generatedImages`, while keeping `raw` payload access.
 - [x] Add explicit job validation per capability
   - Added early validation before queueing: prompt required for image generation; file-or-URL style input required for speech-to-text / OCR / vision jobs.
+  - Tightened request/source schemas further with safer package-relative path constraints plus bounded file metadata/attachment counts.
 - [x] Add better error payloads and job failure reasons
   - Added typed app/job errors with `code`, `type`, `details`, and `retriable`; failed jobs now retain structured failure reasons instead of a bare string.
 

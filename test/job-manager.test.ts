@@ -42,7 +42,8 @@ class RecordingAdapter {
         }))
       },
       output: {
-        data: {
+        kind: request.capability ?? inferCapabilityForJobType(request.type),
+        raw: {
           ok: true,
           podId: manifest.id,
           type: request.type

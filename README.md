@@ -181,6 +181,7 @@ Current scope is intentionally narrow:
 - **materializes and installs** `local-file`, `github-repo`, direct `git-repo`, and first-pass `uploaded-archive` sources immediately
 - still returns a planning response for delegated `registry-index` aliases
 - uploaded archives are currently accepted as JSON/base64 payloads rather than streaming multipart uploads
+- archive installs now reject path traversal / absolute-path entries, reject symlinks after extraction, and enforce first-pass limits of 64 MiB compressed, 256 MiB extracted, and 2000 extracted entries
 
 Example alias request:
 
@@ -252,7 +253,7 @@ Example direct uploaded archive request:
 
 For `github-repo` aliases and direct `git-repo` requests, the server performs a first-pass `git clone`, optionally checks out `ref`, reads the package manifest from `subpath`/`packageManifestPath`, validates it, then copies that package directory into managed storage under `.data/pod-packages/<alias>` before recording installed metadata.
 
-For direct `uploaded-archive` requests, the server accepts a JSON source descriptor containing `filename`, `archiveBase64`, and optional `subpath` / `packageManifestPath`. It writes the archive to a temp directory, unpacks a narrow first-pass set (`.tar`, `.tar.gz`, `.tgz`, `.zip`), validates the extracted `pod-package.json`, then copies the extracted package into the same managed storage / installed-metadata flow used by local and Git sources.
+For direct `uploaded-archive` requests, the server accepts a JSON source descriptor containing `filename`, `archiveBase64`, and optional `subpath` / `packageManifestPath`. It writes the archive to a temp directory, preflights archive entry names, unpacks a narrow first-pass set (`.tar`, `.tar.gz`, `.tgz`, `.zip`), rejects path traversal / absolute-path entries, rejects symlinks and unsupported extracted entry types, enforces first-pass limits (64 MiB compressed, 256 MiB extracted, 2000 extracted entries), validates the extracted `pod-package.json`, then copies the extracted package into the same managed storage / installed-metadata flow used by local and Git sources.
 
 Delegated `registry-index` aliases still return a planning response with `materialization.status: "resolved"` and a `nextAction` string.
 
@@ -554,7 +555,11 @@ Normalized completed result shape:
       ]
     },
     "output": {
-      "data": {
+      "kind": "speech-to-text",
+      "transcript": {
+        "text": "hello world"
+      },
+      "raw": {
         "acceptedAt": "2026-03-20T22:00:00.000Z",
         "submitUrl": "http://127.0.0.1:8001/transcribe",
         "method": "POST",
@@ -567,6 +572,14 @@ Normalized completed result shape:
   }
 }
 ```
+
+Capability-specific normalized output keys now stay consistent across success and failure:
+- `speech-to-text` -> `output.kind: "speech-to-text"` with `output.transcript`
+- `ocr` -> `output.kind: "ocr"` with `output.text` and optional `output.detections`
+- `vision` -> `output.kind: "vision"` with optional `output.text` / `output.detections`
+- `image-generation` -> `output.kind: "image-generation"` with `output.generatedImages`
+- all successful outputs may also include `output.files` plus `output.raw` for the original provider payload
+- all failed outputs keep the same `output.kind` and attach `output.error`
 
 Normalized failed result shape:
 
@@ -581,6 +594,7 @@ Normalized failed result shape:
       "files": []
     },
     "output": {
+      "kind": "speech-to-text",
       "error": {
         "code": "POD_REQUEST_ERROR",
         "message": "Pod request failed (503 Service Unavailable) for whisper",
@@ -808,6 +822,8 @@ Each alias can resolve to one of three source models:
 - `uploaded-archive`
   - points at a direct uploaded archive payload carried in the request as JSON/base64
   - current first pass supports `.tar`, `.tar.gz`, `.tgz`, and `.zip` extraction
+  - rejects traversal / absolute-path archive entries and extracted symlinks
+  - enforces 64 MiB compressed, 256 MiB extracted, and 2000 extracted-entry limits
   - useful for local clients that already have package bytes and just need a direct materialize/install call
 - `registry-index`
   - points at another registry index URL plus an alias to resolve there
@@ -888,6 +904,7 @@ This first pass intentionally keeps a few things stubbed/small:
 - no auth/rate limiting
 - pod lifecycle commands are described in manifests but not executed yet
 - `POST /pods/create` now fully materializes local packages, first-pass GitHub/direct Git sources, and first-pass uploaded archive sources, but archive uploads are still JSON/base64 only (no multipart/streaming yet)
+- normalized job results are now capability-shaped (`transcript`, `detections`, `generatedImages`) instead of only exposing a generic blob
 - only FIFO scheduling for now
 
 ## License

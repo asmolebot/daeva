@@ -2,21 +2,28 @@ import { readFile } from 'node:fs/promises';
 
 import { AppError, JobExecutionError, JobValidationError, PodRequestError, SchedulingError } from './errors.js';
 import type {
+  DetectionItem,
+  GeneratedImageItem,
   JobCapabilityContract,
   JobCompletedResult,
   JobFileInput,
+  JobOutput,
   JobRequest,
   JobRequestFileUpload,
   JobResultOutputFile,
   PodCapability,
   PodManifest,
-  RunContext
+  RunContext,
+  TranscriptSegment
 } from './types.js';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const hasNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
+
+const asNumber = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 
 export const inferCapabilityForJobType = (type: string): PodCapability => {
   const lowered = type.toLowerCase();
@@ -171,30 +178,180 @@ const normalizeOutputFiles = (value: unknown): JobResultOutputFile[] => {
   });
 };
 
-export const normalizeCompletedResult = (manifest: PodManifest, request: JobRequest, capability: PodCapability, response: unknown): JobCompletedResult => {
-  const outputText = isRecord(response) && hasNonEmptyString(response.text) ? response.text : undefined;
-  const outputFiles = normalizeOutputFiles(response);
+const unwrapPodResponse = (response: unknown): unknown => {
+  if (!isRecord(response)) {
+    return response;
+  }
 
-  return {
-    status: 'succeeded',
-    pod: {
-      id: manifest.id,
-      nickname: manifest.nickname,
-      runtime: {
-        kind: manifest.runtime.kind,
-        baseUrl: manifest.runtime.baseUrl,
-        submitPath: manifest.runtime.submitPath,
-        method: manifest.runtime.method ?? 'POST'
-      }
-    },
-    request: createCapabilityContract(request, capability),
-    output: {
-      text: outputText,
-      files: outputFiles,
-      data: response
-    }
-  };
+  return 'response' in response ? response.response : response;
 };
+
+const normalizeTranscriptSegments = (value: unknown): TranscriptSegment[] | undefined => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const segments = value.flatMap((segment) => {
+    if (!isRecord(segment) || !hasNonEmptyString(segment.text)) {
+      return [];
+    }
+
+    return [{
+      text: segment.text,
+      startMs: asNumber(segment.startMs ?? segment.start ?? segment.start_ms),
+      endMs: asNumber(segment.endMs ?? segment.end ?? segment.end_ms),
+      confidence: asNumber(segment.confidence),
+      speaker: hasNonEmptyString(segment.speaker) ? segment.speaker : undefined
+    } satisfies TranscriptSegment];
+  });
+
+  return segments.length > 0 ? segments : undefined;
+};
+
+const normalizeDetections = (value: unknown): DetectionItem[] | undefined => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const detections = value.flatMap((item) => {
+    if (!isRecord(item) || !hasNonEmptyString(item.label ?? item.name ?? item.text)) {
+      return [];
+    }
+
+    const boxSource = isRecord(item.box)
+      ? item.box
+      : isRecord(item.bbox)
+        ? item.bbox
+        : item;
+
+    const metadata = isRecord(item.metadata) ? item.metadata : undefined;
+
+    return [{
+      label: String(item.label ?? item.name ?? item.text),
+      confidence: asNumber(item.confidence ?? item.score),
+      text: hasNonEmptyString(item.text) ? item.text : undefined,
+      box: [boxSource.x, boxSource.y, boxSource.width ?? boxSource.w, boxSource.height ?? boxSource.h].some((part) => typeof part === 'number')
+        ? {
+            x: asNumber(boxSource.x),
+            y: asNumber(boxSource.y),
+            width: asNumber(boxSource.width ?? boxSource.w),
+            height: asNumber(boxSource.height ?? boxSource.h)
+          }
+        : undefined,
+      metadata
+    } satisfies DetectionItem];
+  });
+
+  return detections.length > 0 ? detections : undefined;
+};
+
+const normalizeGeneratedImages = (response: unknown, files: JobResultOutputFile[]): GeneratedImageItem[] | undefined => {
+  const source = isRecord(response) && Array.isArray(response.generatedImages)
+    ? response.generatedImages
+    : isRecord(response) && Array.isArray(response.images)
+      ? response.images
+      : files;
+
+  if (!Array.isArray(source)) {
+    return undefined;
+  }
+
+  const images = source.flatMap((item) => {
+    if (isRecord(item)) {
+      const url = hasNonEmptyString(item.url) ? item.url : undefined;
+      const filePath = hasNonEmptyString(item.path) ? item.path : undefined;
+      if (!url && !filePath) {
+        return [];
+      }
+
+      return [{
+        url,
+        path: filePath,
+        filename: hasNonEmptyString(item.filename) ? item.filename : undefined,
+        contentType: hasNonEmptyString(item.contentType) ? item.contentType : undefined,
+        sizeBytes: asNumber(item.sizeBytes),
+        width: asNumber(item.width),
+        height: asNumber(item.height),
+        metadata: isRecord(item.metadata) ? item.metadata : undefined
+      } satisfies GeneratedImageItem];
+    }
+
+    return [];
+  });
+
+  return images.length > 0 ? images : undefined;
+};
+
+const normalizeOutput = (capability: PodCapability, response: unknown): JobOutput => {
+  const payload = unwrapPodResponse(response);
+  const files = normalizeOutputFiles(payload);
+
+  switch (capability) {
+    case 'speech-to-text': {
+      const transcriptText = isRecord(payload)
+        ? (hasNonEmptyString(payload.transcript) ? payload.transcript : hasNonEmptyString(payload.text) ? payload.text : undefined)
+        : hasNonEmptyString(payload)
+          ? payload
+          : undefined;
+      const segments = isRecord(payload) ? normalizeTranscriptSegments(payload.segments) : undefined;
+      return {
+        kind: 'speech-to-text',
+        transcript: transcriptText
+          ? {
+              text: transcriptText,
+              language: isRecord(payload) && hasNonEmptyString(payload.language) ? payload.language : undefined,
+              durationMs: isRecord(payload) ? asNumber(payload.durationMs ?? payload.duration_ms) : undefined,
+              segments
+            }
+          : undefined,
+        files,
+        raw: response
+      };
+    }
+    case 'ocr': {
+      return {
+        kind: 'ocr',
+        text: isRecord(payload) && hasNonEmptyString(payload.text) ? payload.text : hasNonEmptyString(payload) ? payload : undefined,
+        detections: isRecord(payload) ? normalizeDetections(payload.detections ?? payload.regions ?? payload.blocks) : undefined,
+        files,
+        raw: response
+      };
+    }
+    case 'vision': {
+      return {
+        kind: 'vision',
+        text: isRecord(payload) && hasNonEmptyString(payload.text) ? payload.text : hasNonEmptyString(payload) ? payload : undefined,
+        detections: isRecord(payload) ? normalizeDetections(payload.detections ?? payload.objects ?? payload.labels) : undefined,
+        files,
+        raw: response
+      };
+    }
+    case 'image-generation': {
+      return {
+        kind: 'image-generation',
+        generatedImages: normalizeGeneratedImages(payload, files),
+        files,
+        raw: response
+      };
+    }
+  }
+};
+
+export const normalizeCompletedResult = (manifest: PodManifest, request: JobRequest, capability: PodCapability, response: unknown): JobCompletedResult => ({
+  status: 'succeeded',
+  pod: {
+    id: manifest.id,
+    nickname: manifest.nickname,
+    runtime: {
+      kind: manifest.runtime.kind,
+      baseUrl: manifest.runtime.baseUrl,
+      submitPath: manifest.runtime.submitPath,
+      method: manifest.runtime.method ?? 'POST'
+    }
+  },
+  request: createCapabilityContract(request, capability),
+  output: normalizeOutput(capability, response)
+});
 
 export const createFailedResult = (manifest: PodManifest | undefined, request: JobRequest, capability: PodCapability | undefined, error: unknown): JobCompletedResult => ({
   status: 'failed',
@@ -212,6 +369,7 @@ export const createFailedResult = (manifest: PodManifest | undefined, request: J
     : undefined,
   request: capability ? createCapabilityContract(request, capability) : undefined,
   output: {
+    kind: capability ?? 'vision',
     error: serializeErrorForResult(error)
   }
 });

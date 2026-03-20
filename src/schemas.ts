@@ -9,6 +9,19 @@ const lifecycleCommandSchema = z.object({
   simulatedDelayMs: z.number().int().nonnegative().optional()
 });
 
+const safeRelativePathSchema = z.string().min(1).refine((value) => {
+  const normalized = value.replace(/\\/g, '/');
+  if (normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized)) {
+    return false;
+  }
+  const safe = normalized.split('/').filter(Boolean);
+  return safe.length > 0 && !safe.includes('..');
+}, 'Expected a package-relative path without path traversal');
+
+const safeSourceFilenameSchema = z.string().min(1).max(255).refine((value) => value === value.split(/[\\/]/).pop(), 'filename must not include path separators');
+
+const metadataRecordSchema = z.record(z.unknown());
+
 export const podManifestSchema = z.object({
   id: z.string().min(1),
   nickname: z.string().min(1),
@@ -31,36 +44,36 @@ export const podManifestSchema = z.object({
   startup: lifecycleCommandSchema.optional(),
   shutdown: lifecycleCommandSchema.optional(),
   exclusivityGroup: z.string().optional(),
-  metadata: z.record(z.unknown()).optional()
+  metadata: metadataRecordSchema.optional()
 });
 
 export const registrySourceSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('local-file'),
     path: z.string().min(1),
-    packageManifestPath: z.string().min(1).optional()
+    packageManifestPath: safeRelativePathSchema.optional()
   }),
   z.object({
     kind: z.literal('github-repo'),
     repo: z.string().regex(/^[^/]+\/[^/]+$/, 'Expected owner/repo'),
     ref: z.string().min(1).optional(),
-    subpath: z.string().min(1).optional(),
-    packageManifestPath: z.string().min(1).optional()
+    subpath: safeRelativePathSchema.optional(),
+    packageManifestPath: safeRelativePathSchema.optional()
   }),
   z.object({
     kind: z.literal('git-repo'),
     repoUrl: z.string().url(),
     ref: z.string().min(1).optional(),
-    subpath: z.string().min(1).optional(),
-    packageManifestPath: z.string().min(1).optional()
+    subpath: safeRelativePathSchema.optional(),
+    packageManifestPath: safeRelativePathSchema.optional()
   }),
   z.object({
     kind: z.literal('uploaded-archive'),
-    filename: z.string().min(1),
+    filename: safeSourceFilenameSchema.refine((value) => /\.(zip|tar|tar\.gz|tgz)$/i.test(value), 'Supported archive types are .tar, .tar.gz, .tgz, and .zip'),
     archiveBase64: z.string().min(1),
     contentType: z.string().min(1).optional(),
-    subpath: z.string().min(1).optional(),
-    packageManifestPath: z.string().min(1).optional()
+    subpath: safeRelativePathSchema.optional(),
+    packageManifestPath: safeRelativePathSchema.optional()
   }),
   z.object({
     kind: z.literal('registry-index'),
@@ -87,24 +100,24 @@ export const podRegistryIndexSchema = z.object({
   entries: z.array(podRegistryIndexEntrySchema).min(1)
 });
 
+const jobFileCommonSchema = {
+  field: z.string().min(1).max(128).optional(),
+  filename: safeSourceFilenameSchema.optional(),
+  contentType: z.string().min(1).max(255).optional(),
+  sizeBytes: z.number().int().nonnegative().max(64 * 1024 * 1024).optional(),
+  metadata: metadataRecordSchema.optional()
+};
+
 const jobFileInputSchema = z.discriminatedUnion('source', [
   z.object({
     source: z.literal('path'),
     path: z.string().min(1),
-    field: z.string().min(1).optional(),
-    filename: z.string().min(1).optional(),
-    contentType: z.string().min(1).optional(),
-    sizeBytes: z.number().int().nonnegative().optional(),
-    metadata: z.record(z.unknown()).optional()
+    ...jobFileCommonSchema
   }),
   z.object({
     source: z.literal('upload'),
     uploadBase64: z.string().min(1),
-    field: z.string().min(1).optional(),
-    filename: z.string().min(1).optional(),
-    contentType: z.string().min(1).optional(),
-    sizeBytes: z.number().int().nonnegative().optional(),
-    metadata: z.record(z.unknown()).optional()
+    ...jobFileCommonSchema
   })
 ]);
 
@@ -112,9 +125,9 @@ export const jobRequestSchema = z.object({
   type: z.string().min(1),
   capability: podCapabilitySchema.optional(),
   preferredPodId: z.string().min(1).optional(),
-  input: z.record(z.unknown()),
-  files: z.array(jobFileInputSchema).optional(),
-  metadata: z.record(z.unknown()).optional()
+  input: metadataRecordSchema,
+  files: z.array(jobFileInputSchema).max(16).optional(),
+  metadata: metadataRecordSchema.optional()
 });
 
 export const podCreateRequestSchema = z.object({
@@ -141,18 +154,18 @@ export const podPackageManifestSchema = z.object({
   description: z.string().min(1).optional(),
   pod: podManifestSchema,
   artifacts: z.object({
-    readme: z.string().min(1).optional(),
-    icon: z.string().min(1).optional(),
-    dockerfile: z.string().min(1).optional(),
-    composeFile: z.string().min(1).optional(),
-    installScript: z.string().min(1).optional(),
-    startScript: z.string().min(1).optional(),
-    stopScript: z.string().min(1).optional(),
-    systemdUnit: z.string().min(1).optional(),
-    quadlet: z.string().min(1).optional()
+    readme: safeRelativePathSchema.optional(),
+    icon: safeRelativePathSchema.optional(),
+    dockerfile: safeRelativePathSchema.optional(),
+    composeFile: safeRelativePathSchema.optional(),
+    installScript: safeRelativePathSchema.optional(),
+    startScript: safeRelativePathSchema.optional(),
+    stopScript: safeRelativePathSchema.optional(),
+    systemdUnit: safeRelativePathSchema.optional(),
+    quadlet: safeRelativePathSchema.optional()
   }).optional(),
   directories: z.array(z.object({
-    path: z.string().min(1),
+    path: safeRelativePathSchema,
     purpose: z.enum(['config', 'data', 'models', 'input', 'output', 'cache', 'workspace', 'custom']),
     required: z.boolean().optional(),
     createIfMissing: z.boolean().optional(),
@@ -179,7 +192,7 @@ export const podPackageManifestSchema = z.object({
     request: z.object({
       type: z.string().min(1),
       capability: podCapabilitySchema.optional(),
-      input: z.record(z.unknown())
+      input: metadataRecordSchema
     })
   })).optional(),
   source: z.object({

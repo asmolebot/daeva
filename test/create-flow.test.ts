@@ -22,7 +22,6 @@ cpSync(gitPackageWorktree, path.join(gitRepoRoot, 'package'), { recursive: true 
 execFileSync('git', ['-C', gitRepoRoot, 'add', '.'], { stdio: 'pipe' });
 execFileSync('git', ['-C', gitRepoRoot, '-c', 'user.name=Asmo', '-c', 'user.email=asmo@example.com', 'commit', '-m', 'fixture'], { stdio: 'pipe' });
 
-
 const archiveFixtureRoot = path.join(tempRoot, 'archive-fixture');
 const archivePackageRoot = path.join(archiveFixtureRoot, 'archive-package');
 mkdirSync(archiveFixtureRoot, { recursive: true });
@@ -30,6 +29,13 @@ cpSync(path.resolve(process.cwd(), 'examples/whisper-pod-package'), archivePacka
 const archivePath = path.join(archiveFixtureRoot, 'whisper-package.tar.gz');
 execFileSync('tar', ['-czf', archivePath, '-C', archiveFixtureRoot, 'archive-package'], { stdio: 'pipe' });
 const archiveBase64 = readFileSync(archivePath).toString('base64');
+
+const traversalArchiveRoot = path.join(tempRoot, 'archive-traversal-fixture');
+mkdirSync(traversalArchiveRoot, { recursive: true });
+writeFileSync(path.join(traversalArchiveRoot, 'pod-package.json'), JSON.stringify({ nope: true }));
+const traversalArchivePath = path.join(tempRoot, 'evil.tar');
+execFileSync('tar', ['-cf', traversalArchivePath, '-C', traversalArchiveRoot, '--transform=s|pod-package.json|../escape/pod-package.json|', 'pod-package.json'], { stdio: 'pipe' });
+const traversalArchiveBase64 = readFileSync(traversalArchivePath).toString('base64');
 
 afterAll(() => {
   rmSync(tempRoot, { recursive: true, force: true });
@@ -114,8 +120,6 @@ describe('create flow planning', () => {
     expect(installedPackageStore.list()).toHaveLength(1);
   });
 
-
-
   it('materializes a direct uploaded-archive source request into managed storage', () => {
     const registry = new PodRegistry();
     const podController = new PodController(registry.list());
@@ -152,6 +156,58 @@ describe('create flow planning', () => {
     expect(result.materialization.installedPackage.materializedPath).toContain('archive-materialized');
     expect(readFileSync(result.materialization.installedPackage.packageManifestPath, 'utf8')).toContain('asmo-whisper');
     expect(installedPackageStore.list()).toHaveLength(1);
+  });
+
+  it('rejects uploaded archive path traversal entries before extraction', () => {
+    const registry = new PodRegistry();
+    const podController = new PodController(registry.list());
+    const installedPackageStore = new InstalledPackageStore({
+      storageFilePath: path.join(tempRoot, 'bad-archive-installed-packages.json')
+    });
+
+    expect(() => createFromAlias(
+      {
+        alias: 'bad-archive',
+        source: {
+          kind: 'uploaded-archive',
+          filename: 'evil.tar',
+          archiveBase64: traversalArchiveBase64
+        }
+      },
+      {
+        registry,
+        podController,
+        installedPackageStore,
+        managedPackagesRoot: path.join(tempRoot, 'bad-archive-materialized')
+      }
+    )).toThrow(/path traversal/i);
+  });
+
+  it('rejects uploaded archive subpaths that attempt to escape the extracted root', () => {
+    const registry = new PodRegistry();
+    const podController = new PodController(registry.list());
+    const installedPackageStore = new InstalledPackageStore({
+      storageFilePath: path.join(tempRoot, 'bad-subpath-installed-packages.json')
+    });
+
+    expect(() => createFromAlias(
+      {
+        alias: 'bad-subpath',
+        source: {
+          kind: 'uploaded-archive',
+          filename: 'whisper-package.tar.gz',
+          archiveBase64,
+          subpath: '../archive-package',
+          packageManifestPath: 'pod-package.json'
+        }
+      },
+      {
+        registry,
+        podController,
+        installedPackageStore,
+        managedPackagesRoot: path.join(tempRoot, 'bad-subpath-materialized')
+      }
+    )).toThrow(/package root/i);
   });
 
   it('returns undefined for an unknown alias when only planning', () => {
