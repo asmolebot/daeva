@@ -8,6 +8,7 @@ Current focus:
 - pod registry + packaged manifests
 - first-class built-ins for ComfyUI/comfyapi, Whisper, and OCR/Vision
 - start/stop/switch behavior for pods that contend for the same GPU slot
+- Phase 3 package spec groundwork for portable pod packages
 
 This is intentionally not a giant orchestration cathedral. It's the practical first draft: coherent, testable, and easy to extend.
 
@@ -29,6 +30,7 @@ Core pieces:
 - **`JobManager`**: simple in-memory FIFO queue with async status/result tracking
 - **`HttpPodAdapter`**: stubbed execution adapter that returns a normalized result shape; easy place to swap in real service calls/polling
 - **Fastify API**: lightweight REST interface for pods, jobs, and future package upload scaffolding
+- **Zod schemas**: validation for both standalone pod manifests and portable `pod-package.json` bundles
 
 ### Runtime model
 
@@ -129,6 +131,7 @@ Example:
   "id": "vision-lora-worker",
   "nickname": "Vision Lora Worker",
   "description": "Example external pod",
+  "manifestVersion": "1",
   "capabilities": ["vision"],
   "source": {
     "homepage": "https://example.com/worker",
@@ -195,19 +198,131 @@ Get a single job and its current state:
 ### `GET /jobs/:jobId/result`
 Return the result payload once complete, otherwise `null`.
 
+## Portable pod package spec
+
+Phase 3 now defines a canonical **JSON** package manifest: `pod-package.json`.
+
+Why JSON right now:
+- the project is already TypeScript + Zod-first
+- package ingestion needs deterministic validation before install flows exist
+- JSON keeps examples, tests, and future API upload payloads simple
+
+YAML can still be supported later as an import/conversion layer, but `pod-package.json` is the canonical on-disk format for package validation and versioning.
+
+### Versioning strategy
+
+There are two explicit version markers:
+
+- `schemaVersion`: version of the outer portable package contract (`pod-package.json`)
+- `pod.manifestVersion`: version of the inner runnable pod manifest contract
+
+Current values:
+- `schemaVersion: "1"`
+- `pod.manifestVersion: "1"`
+
+Rule of thumb:
+- breaking schema/layout changes => bump `schemaVersion`
+- breaking runtime manifest changes => bump `pod.manifestVersion`
+- normal package release/version updates => bump package `version`, not the schema version
+
+### Required package files
+
+Minimum portable package layout:
+- `pod-package.json` — canonical package manifest
+- `README.md` — human-facing setup/usage notes
+
+### Optional package files
+
+Optional but explicitly modeled in the manifest:
+- `Dockerfile`
+- `deploy/*.container` or other systemd/quadlet units
+- `scripts/install.sh`
+- `scripts/start.sh`
+- `scripts/stop.sh`
+- local `data/` scaffolding directories for models, inputs, outputs, cache, etc.
+
+### Canonical example layout
+
+```text
+examples/whisper-pod-package/
+├── pod-package.json
+├── README.md
+├── Dockerfile
+├── deploy/
+│   └── whisper.container
+└── scripts/
+    ├── install.sh
+    ├── start.sh
+    └── stop.sh
+```
+
+### Example `pod-package.json`
+
+See `examples/whisper-pod-package/pod-package.json` for the full example. High-level shape:
+
+```json
+{
+  "schemaVersion": "1",
+  "packageType": "pod-package",
+  "name": "asmo-whisper",
+  "version": "0.1.0",
+  "pod": {
+    "id": "whisper",
+    "nickname": "Whisper",
+    "description": "Speech-to-text pod for local transcription jobs.",
+    "manifestVersion": "1",
+    "capabilities": ["speech-to-text"],
+    "runtime": {
+      "kind": "http-service",
+      "baseUrl": "http://127.0.0.1:8001",
+      "healthPath": "/health",
+      "submitPath": "/transcribe",
+      "method": "POST"
+    }
+  },
+  "artifacts": {
+    "readme": "README.md",
+    "dockerfile": "Dockerfile",
+    "installScript": "scripts/install.sh",
+    "startScript": "scripts/start.sh",
+    "stopScript": "scripts/stop.sh",
+    "quadlet": "deploy/whisper.container"
+  },
+  "directories": [
+    {
+      "path": "data/models",
+      "purpose": "models",
+      "required": true,
+      "createIfMissing": true
+    }
+  ]
+}
+```
+
+### Package contract notes
+
+The package spec intentionally separates three things:
+- **package metadata** (`name`, `version`, `schemaVersion`)
+- **runnable pod manifest** (`pod`)
+- **install/service hints** (`artifacts`, `directories`, `environment`, `install`, `service`)
+
+That gives Phase 3 install flows a stable contract without prematurely locking the actual installer implementation.
+
 ## Sample manifest format
 
 See:
 - `src/manifests/builtin.ts`
 - `manifests/example.custom-pod.json`
+- `examples/whisper-pod-package/pod-package.json`
 
-High-level shape:
+High-level standalone pod manifest shape:
 
 ```json
 {
   "id": "string",
   "nickname": "string",
   "description": "string",
+  "manifestVersion": "1",
   "capabilities": ["image-generation", "speech-to-text", "ocr", "vision"],
   "source": {
     "homepage": "https://...",
@@ -241,8 +356,10 @@ High-level shape:
 - `src/pod-controller.ts` — runtime state + exclusivity switching
 - `src/registry.ts` — pod registry
 - `src/adapters.ts` — execution adapter abstraction
+- `src/schemas.ts` — Zod schemas for request validation and pod/package manifests
 - `src/manifests/builtin.ts` — bundled pod definitions
-- `test/*.test.ts` — core scheduler/job/API tests
+- `examples/whisper-pod-package/` — example portable pod package layout
+- `test/*.test.ts` — core scheduler/job/API/schema tests
 
 ## Future work / roadmap
 
@@ -255,9 +372,9 @@ Near-term:
 - health checks and pod warmup policies
 
 Planned packaging feature:
-- upload tarball/docker context + init scripts
-- unpack and validate a pod package
-- register package metadata/manifests
+- add registry index + alias resolution
+- unpack and validate pod packages from git/archive sources
+- register installed package metadata
 - optionally build/install the pod on the local host
 
 ## Current limitations
@@ -267,6 +384,7 @@ This first pass intentionally keeps a few things stubbed/small:
 - no persistent job store
 - no auth/rate limiting
 - pod lifecycle commands are described in manifests but not executed yet
+- package schema exists, but create/install flows are still future work
 - only FIFO scheduling for now
 
 ## License

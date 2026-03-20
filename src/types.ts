@@ -1,11 +1,15 @@
 export type PodCapability = 'image-generation' | 'speech-to-text' | 'ocr' | 'vision';
 export type PodLifecycleStatus = 'stopped' | 'starting' | 'running' | 'stopping';
 export type JobStatus = 'queued' | 'running' | 'completed' | 'failed';
+export type HttpMethod = 'GET' | 'POST';
+export type PodManifestVersion = '1';
+export type PodPackageSchemaVersion = '1';
 
 export interface PodManifest {
   id: string;
   nickname: string;
   description: string;
+  manifestVersion?: PodManifestVersion;
   capabilities: PodCapability[];
   source: {
     homepage?: string;
@@ -18,7 +22,7 @@ export interface PodManifest {
     healthPath?: string;
     submitPath: string;
     resultPath?: string;
-    method?: 'GET' | 'POST';
+    method?: HttpMethod;
   };
   startup?: {
     command?: string;
@@ -34,6 +38,62 @@ export interface PodManifest {
   };
   exclusivityGroup?: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface PodPackageManifest {
+  schemaVersion: PodPackageSchemaVersion;
+  packageType: 'pod-package';
+  name: string;
+  version: string;
+  description?: string;
+  pod: PodManifest;
+  artifacts?: {
+    readme?: string;
+    icon?: string;
+    dockerfile?: string;
+    composeFile?: string;
+    installScript?: string;
+    startScript?: string;
+    stopScript?: string;
+    systemdUnit?: string;
+    quadlet?: string;
+  };
+  directories?: Array<{
+    path: string;
+    purpose: 'config' | 'data' | 'models' | 'input' | 'output' | 'cache' | 'workspace' | 'custom';
+    required?: boolean;
+    createIfMissing?: boolean;
+    description?: string;
+  }>;
+  environment?: Array<{
+    name: string;
+    required?: boolean;
+    default?: string;
+    description?: string;
+    secret?: boolean;
+  }>;
+  install?: {
+    strategy?: 'none' | 'dockerfile' | 'compose' | 'script' | 'prebuilt-image';
+    notes?: string;
+  };
+  service?: {
+    installMode?: 'manual' | 'user-systemd' | 'systemd' | 'quadlet';
+    serviceName?: string;
+  };
+  examples?: Array<{
+    name: string;
+    description?: string;
+    request: {
+      type: string;
+      capability?: PodCapability;
+      input: Record<string, unknown>;
+    };
+  }>;
+  source?: {
+    homepage?: string;
+    repository?: string;
+    documentation?: string;
+  };
 }
 
 export interface JobRequest {

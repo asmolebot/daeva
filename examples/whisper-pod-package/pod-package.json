@@ -1,0 +1,99 @@
+{
+  "schemaVersion": "1",
+  "packageType": "pod-package",
+  "name": "asmo-whisper",
+  "version": "0.1.0",
+  "description": "Portable package metadata for a local Whisper transcription pod.",
+  "pod": {
+    "id": "whisper",
+    "nickname": "Whisper",
+    "description": "Speech-to-text pod for local transcription jobs.",
+    "manifestVersion": "1",
+    "capabilities": ["speech-to-text"],
+    "source": {
+      "homepage": "https://github.com/openai/whisper",
+      "readme": "https://github.com/openai/whisper#readme",
+      "repository": "https://github.com/openai/whisper"
+    },
+    "runtime": {
+      "kind": "http-service",
+      "baseUrl": "http://127.0.0.1:8001",
+      "healthPath": "/health",
+      "submitPath": "/transcribe",
+      "method": "POST"
+    },
+    "startup": {
+      "command": "./scripts/start.sh"
+    },
+    "shutdown": {
+      "command": "./scripts/stop.sh"
+    },
+    "exclusivityGroup": "gpu-0",
+    "metadata": {
+      "packageManifestVersion": "1"
+    }
+  },
+  "artifacts": {
+    "readme": "README.md",
+    "dockerfile": "Dockerfile",
+    "installScript": "scripts/install.sh",
+    "startScript": "scripts/start.sh",
+    "stopScript": "scripts/stop.sh",
+    "quadlet": "deploy/whisper.container"
+  },
+  "directories": [
+    {
+      "path": "data/models",
+      "purpose": "models",
+      "required": true,
+      "createIfMissing": true,
+      "description": "Mounted Whisper models directory."
+    },
+    {
+      "path": "data/input",
+      "purpose": "input",
+      "createIfMissing": true,
+      "description": "Optional local scratch space for uploads."
+    }
+  ],
+  "environment": [
+    {
+      "name": "WHISPER_MODEL",
+      "default": "large-v3-turbo",
+      "description": "Default model loaded by the pod."
+    },
+    {
+      "name": "WHISPER_DEVICE",
+      "default": "cuda",
+      "description": "Execution device.",
+      "required": false
+    }
+  ],
+  "install": {
+    "strategy": "prebuilt-image",
+    "notes": "Future installers can choose between podman run, compose, or quadlet generation."
+  },
+  "service": {
+    "installMode": "quadlet",
+    "serviceName": "asmo-whisper"
+  },
+  "examples": [
+    {
+      "name": "transcribe-audio",
+      "description": "Minimal orchestrator job payload.",
+      "request": {
+        "type": "transcribe-audio",
+        "capability": "speech-to-text",
+        "input": {
+          "filePath": "/tmp/demo.wav",
+          "contentType": "audio/wav"
+        }
+      }
+    }
+  ],
+  "source": {
+    "homepage": "https://github.com/openai/whisper",
+    "repository": "https://github.com/example/asmo-whisper-pod-package",
+    "documentation": "https://github.com/example/asmo-whisper-pod-package#readme"
+  }
+}

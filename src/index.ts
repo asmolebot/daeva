@@ -3,6 +3,7 @@ export * from './errors.js';
 export * from './job-manager.js';
 export * from './manifest-loader.js';
 export * from './manifests/builtin.js';
+export * from './schemas.js';
 export * from './pod-controller.js';
 export * from './registry.js';
 export * from './router.js';

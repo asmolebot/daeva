@@ -2,6 +2,7 @@
   "id": "vision-lora-worker",
   "nickname": "Vision Lora Worker",
   "description": "Example packaged manifest for a future uploaded pod.",
+  "manifestVersion": "1",
   "capabilities": ["vision"],
   "source": {
     "homepage": "https://example.com/vision-lora-worker",

@@ -5,6 +5,7 @@ export const builtinManifests: PodManifest[] = [
     id: 'comfyapi',
     nickname: 'Comfy',
     description: 'ComfyUI-style image generation pod for prompt-driven GPU jobs.',
+    manifestVersion: '1',
     capabilities: ['image-generation', 'vision'],
     source: {
       homepage: 'https://github.com/comfyanonymous/ComfyUI',
@@ -36,6 +37,7 @@ export const builtinManifests: PodManifest[] = [
     id: 'whisper',
     nickname: 'Whisper',
     description: 'Speech-to-text pod for local transcription jobs.',
+    manifestVersion: '1',
     capabilities: ['speech-to-text'],
     source: {
       homepage: 'https://github.com/openai/whisper',
@@ -67,6 +69,7 @@ export const builtinManifests: PodManifest[] = [
     id: 'ocr-vision',
     nickname: 'OCR Vision',
     description: 'OCR and vision pod for extracting text and basic image understanding.',
+    manifestVersion: '1',
     capabilities: ['ocr', 'vision'],
     source: {
       homepage: 'https://github.com/JaidedAI/EasyOCR',
