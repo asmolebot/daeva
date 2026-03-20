@@ -4,6 +4,7 @@ export type JobStatus = 'queued' | 'running' | 'completed' | 'failed';
 export type HttpMethod = 'GET' | 'POST';
 export type PodManifestVersion = '1';
 export type PodPackageSchemaVersion = '1';
+export type PodRegistryIndexSchemaVersion = '1';
 
 export interface PodManifest {
   id: string;
@@ -94,6 +95,49 @@ export interface PodPackageManifest {
     repository?: string;
     documentation?: string;
   };
+}
+
+export interface LocalFileRegistrySource {
+  kind: 'local-file';
+  path: string;
+  packageManifestPath?: string;
+}
+
+export interface GithubRepoRegistrySource {
+  kind: 'github-repo';
+  repo: string;
+  ref?: string;
+  subpath?: string;
+  packageManifestPath?: string;
+}
+
+export interface RegistryIndexRegistrySource {
+  kind: 'registry-index';
+  indexUrl: string;
+  alias: string;
+}
+
+export type RegistrySource =
+  | LocalFileRegistrySource
+  | GithubRepoRegistrySource
+  | RegistryIndexRegistrySource;
+
+export interface PodRegistryIndexEntry {
+  alias: string;
+  packageName: string;
+  podId?: string;
+  description?: string;
+  capabilities?: PodCapability[];
+  tags?: string[];
+  source: RegistrySource;
+}
+
+export interface PodRegistryIndex {
+  schemaVersion: PodRegistryIndexSchemaVersion;
+  indexType: 'pod-registry-index';
+  name: string;
+  description?: string;
+  entries: PodRegistryIndexEntry[];
 }
 
 export interface JobRequest {

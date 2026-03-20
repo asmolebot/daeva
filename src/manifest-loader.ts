@@ -1,7 +1,27 @@
-import type { PodManifest, PodPackageManifest } from './types.js';
-import { podManifestSchema, podPackageManifestSchema } from './schemas.js';
+import type {
+  PodManifest,
+  PodPackageManifest,
+  PodRegistryIndex,
+  PodRegistryIndexEntry,
+  RegistrySource
+} from './types.js';
+import {
+  podManifestSchema,
+  podPackageManifestSchema,
+  podRegistryIndexEntrySchema,
+  podRegistryIndexSchema,
+  registrySourceSchema
+} from './schemas.js';
 
 export const parseManifest = (input: unknown): PodManifest => podManifestSchema.parse(input);
 
 export const parsePodPackageManifest = (input: unknown): PodPackageManifest =>
   podPackageManifestSchema.parse(input);
+
+export const parseRegistrySource = (input: unknown): RegistrySource => registrySourceSchema.parse(input);
+
+export const parsePodRegistryIndexEntry = (input: unknown): PodRegistryIndexEntry =>
+  podRegistryIndexEntrySchema.parse(input);
+
+export const parsePodRegistryIndex = (input: unknown): PodRegistryIndex =>
+  podRegistryIndexSchema.parse(input);

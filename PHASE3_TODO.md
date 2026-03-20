@@ -52,10 +52,18 @@ The package should describe:
   - Added example files for a Whisper portable package to make the spec tangible.
 
 ### B. Registry model
-- [ ] Add registry source model (local file, GitHub repo, registry index)
-- [ ] Define named alias resolution (`vision` -> repo/package source)
-- [ ] Add a simple registry index format
-- [ ] Add first local sample index for built-in/community pods
+- [x] Add registry source model (local file, GitHub repo, registry index)
+  - Added a typed `RegistrySource` union in `src/types.ts` and Zod validation in `src/schemas.ts` / `src/manifest-loader.ts`.
+  - Supported source kinds are now `local-file`, `github-repo`, and `registry-index`.
+- [x] Define named alias resolution (`vision` -> repo/package source)
+  - `PodRegistry` now tracks alias entries and registry indexes, with `registerAlias()`, `listAliases()`, and `resolveAlias()` helpers.
+  - Default bootstrapped aliases come from the local sample index, so `vision`, `whisper`, and `comfy` now resolve through the registry layer.
+- [x] Add a simple registry index format
+  - Added canonical `pod-registry-index` schema/versioning with `schemaVersion: "1"`, `indexType: "pod-registry-index"`, and `entries[]`.
+  - Each entry keeps scope tight: alias, package identity, optional pod id/capabilities/tags, and a registry source descriptor.
+- [x] Add first local sample index for built-in/community pods
+  - Added `src/manifests/local-registry-index.json` with one local package example (`whisper`), one direct GitHub repo example (`comfy`), and one delegated registry-index alias (`vision`).
+  - Added tests covering source parsing, index parsing, and alias resolution behavior.
 
 ### C. Create/install flow
 - [ ] Add `POST /pods/create` route

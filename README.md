@@ -9,6 +9,7 @@ Current focus:
 - first-class built-ins for ComfyUI/comfyapi, Whisper, and OCR/Vision
 - start/stop/switch behavior for pods that contend for the same GPU slot
 - Phase 3 package spec groundwork for portable pod packages
+- registry source modeling + local alias/index groundwork for future install flows
 
 This is intentionally not a giant orchestration cathedral. It's the practical first draft: coherent, testable, and easy to extend.
 
@@ -358,6 +359,7 @@ High-level standalone pod manifest shape:
 - `src/adapters.ts` — execution adapter abstraction
 - `src/schemas.ts` — Zod schemas for request validation and pod/package manifests
 - `src/manifests/builtin.ts` — bundled pod definitions
+- `src/manifests/local-registry-index.json` — first local sample alias/index catalog
 - `examples/whisper-pod-package/` — example portable pod package layout
 - `test/*.test.ts` — core scheduler/job/API/schema tests
 
@@ -371,8 +373,87 @@ Near-term:
 - richer scheduling policies (priority, concurrency lanes, cost-aware routing)
 - health checks and pod warmup policies
 
+## Registry sources and alias resolution
+
+Phase 3 now includes a small registry/index layer intended to sit in front of future `POST /pods/create` install flows.
+
+### Supported registry source kinds
+
+Each alias can resolve to one of three source models:
+
+- `local-file`
+  - points at a local folder or manifest path already present on disk
+  - useful for built-in packages, checked-in examples, or pre-seeded host content
+- `github-repo`
+  - points at an `owner/repo` GitHub source, with optional `ref`, `subpath`, and `packageManifestPath`
+  - this is the intended default for community pod packages
+- `registry-index`
+  - points at another registry index URL plus an alias to resolve there
+  - useful for delegating from a local shorthand like `vision` to a broader remote catalog
+
+### Registry index format
+
+Canonical index document shape:
+
+```json
+{
+  "schemaVersion": "1",
+  "indexType": "pod-registry-index",
+  "name": "asmo-local-sample-index",
+  "entries": [
+    {
+      "alias": "whisper",
+      "packageName": "asmo-whisper",
+      "podId": "whisper",
+      "source": {
+        "kind": "local-file",
+        "path": "examples/whisper-pod-package",
+        "packageManifestPath": "examples/whisper-pod-package/pod-package.json"
+      }
+    }
+  ]
+}
+```
+
+Entry fields are intentionally small for now:
+- `alias` — user-facing shorthand like `vision` or `whisper`
+- `packageName` — portable package identity
+- `podId` — optional runnable pod id if known up front
+- `capabilities` / `tags` — optional lookup hints for UI/client layers
+- `source` — where install/create flow should fetch or resolve the package from
+
+### Local sample index
+
+A first checked-in sample index now lives at:
+- `src/manifests/local-registry-index.json`
+
+It currently demonstrates:
+- `whisper` → local file/package example
+- `comfy` → direct GitHub repo source
+- `vision` → registry-index delegation to a remote alias
+
+### Registry API surface in code
+
+`PodRegistry` now supports:
+- `addRegistryIndex(index)`
+- `registerAlias(entry)`
+- `listRegistryIndexes()`
+- `listAliases()`
+- `resolveAlias(alias)`
+
+This keeps the registry/index work small and composable without prematurely implementing full package installation.
+
+## Future work / roadmap
+
+Near-term:
+- real HTTP adapter with retries, polling, and timeout handling
+- persist jobs to SQLite/Postgres instead of memory
+- webhook or websocket notifications for job updates
+- execute startup/shutdown commands instead of simulated delays
+- richer scheduling policies (priority, concurrency lanes, cost-aware routing)
+- health checks and pod warmup policies
+
 Planned packaging feature:
-- add registry index + alias resolution
 - unpack and validate pod packages from git/archive sources
 - register installed package metadata
 - optionally build/install the pod on the local host

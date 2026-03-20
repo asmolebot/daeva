@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "1",
+  "indexType": "pod-registry-index",
+  "name": "asmo-local-sample-index",
+  "description": "Local sample registry index for built-in and community pod aliases.",
+  "entries": [
+    {
+      "alias": "whisper",
+      "packageName": "asmo-whisper",
+      "podId": "whisper",
+      "description": "Built-in local Whisper portable package example.",
+      "capabilities": ["speech-to-text"],
+      "tags": ["builtin", "audio", "transcription"],
+      "source": {
+        "kind": "local-file",
+        "path": "examples/whisper-pod-package",
+        "packageManifestPath": "examples/whisper-pod-package/pod-package.json"
+      }
+    },
+    {
+      "alias": "comfy",
+      "packageName": "asmo-comfy-community",
+      "podId": "comfyapi",
+      "description": "Community ComfyUI-style image generation package from GitHub.",
+      "capabilities": ["image-generation", "vision"],
+      "tags": ["community", "image-generation", "comfyui"],
+      "source": {
+        "kind": "github-repo",
+        "repo": "asmoai/asmo-comfy-community-pod",
+        "ref": "main",
+        "packageManifestPath": "pod-package.json"
+      }
+    },
+    {
+      "alias": "vision",
+      "packageName": "asmo-ocr-vision-community",
+      "podId": "ocr-vision",
+      "description": "Alias that resolves through a higher-level community registry index entry.",
+      "capabilities": ["ocr", "vision"],
+      "tags": ["community", "vision", "ocr"],
+      "source": {
+        "kind": "registry-index",
+        "indexUrl": "https://registry.asmo.local/community/index.json",
+        "alias": "ocr-vision"
+      }
+    }
+  ]
+}

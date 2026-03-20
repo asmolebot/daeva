@@ -34,6 +34,44 @@ export const podManifestSchema = z.object({
   metadata: z.record(z.unknown()).optional()
 });
 
+export const registrySourceSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('local-file'),
+    path: z.string().min(1),
+    packageManifestPath: z.string().min(1).optional()
+  }),
+  z.object({
+    kind: z.literal('github-repo'),
+    repo: z.string().regex(/^[^/]+\/[^/]+$/, 'Expected owner/repo'),
+    ref: z.string().min(1).optional(),
+    subpath: z.string().min(1).optional(),
+    packageManifestPath: z.string().min(1).optional()
+  }),
+  z.object({
+    kind: z.literal('registry-index'),
+    indexUrl: z.string().url(),
+    alias: z.string().min(1)
+  })
+]);
+
+export const podRegistryIndexEntrySchema = z.object({
+  alias: z.string().min(1),
+  packageName: z.string().min(1),
+  podId: z.string().min(1).optional(),
+  description: z.string().min(1).optional(),
+  capabilities: z.array(podCapabilitySchema).min(1).optional(),
+  tags: z.array(z.string().min(1)).optional(),
+  source: registrySourceSchema
+});
+
+export const podRegistryIndexSchema = z.object({
+  schemaVersion: z.literal('1'),
+  indexType: z.literal('pod-registry-index'),
+  name: z.string().min(1),
+  description: z.string().min(1).optional(),
+  entries: z.array(podRegistryIndexEntrySchema).min(1)
+});
+
 export const jobRequestSchema = z.object({
   type: z.string().min(1),
   capability: podCapabilitySchema.optional(),
