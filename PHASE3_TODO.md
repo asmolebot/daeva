@@ -74,9 +74,13 @@ The package should describe:
 - [x] Support create from named registry alias
   - Added `src/create-flow.ts` with `planCreateFromAlias()` so alias resolution + next-step messaging lives in one place and can later branch into real materialization handlers.
   - Response now includes the resolved registry entry, normalized source descriptor, and a human/coherent `materialization.nextAction` string.
-- [ ] Unpack/clone package into managed local storage
-- [ ] Validate package manifest before install
-- [ ] Persist installed pod metadata
+- [x] Unpack/clone package into managed local storage
+  - Implemented the `local-file` branch only: `POST /pods/create` now copies the resolved package directory into `.data/pod-packages/<alias>`.
+  - Git clone and archive extraction are intentionally still pending.
+- [x] Validate package manifest before install
+  - Local materialization now reads `pod-package.json` (or the alias-provided manifest path) and validates it with the existing `podPackageManifestSchema` via `parsePodPackageManifest()` before persisting install metadata.
+- [x] Persist installed pod metadata
+  - Added a simple JSON-backed installed package store at `.data/installed-packages.json` plus typed validation for the stored records.
 
 ### D. Runtime/install improvements
 - [ ] Split install/start/stop/build semantics more cleanly in manifests
@@ -93,7 +97,8 @@ The package should describe:
 
 ### F. Richer status
 - [ ] Add endpoint for active runtime/container status
-- [ ] Add endpoint for installed packages and registry sources
+- [x] Add endpoint for installed packages and registry sources
+  - Added `GET /pods/installed` and also linked installed metadata from `POST /pods/create` responses for successfully materialized local packages.
 - [ ] Add endpoint for scheduler/exclusivity state
 - [ ] Add endpoint for recent job history summary
 

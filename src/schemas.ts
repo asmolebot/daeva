@@ -141,3 +141,21 @@ export const podPackageManifestSchema = z.object({
     documentation: z.string().url().optional()
   }).optional()
 });
+
+export const installedPackageMetadataSchema = z.object({
+  alias: z.string().min(1),
+  packageName: z.string().min(1),
+  packageVersion: z.string().min(1),
+  podId: z.string().min(1),
+  installedAt: z.string().datetime(),
+  source: registrySourceSchema,
+  sourcePath: z.string().min(1),
+  packageManifestPath: z.string().min(1),
+  materializedPath: z.string().min(1),
+  manifest: podPackageManifestSchema
+});
+
+export const installedPackageMetadataCollectionSchema = z.object({
+  schemaVersion: z.literal('1'),
+  packages: z.array(installedPackageMetadataSchema)
+});

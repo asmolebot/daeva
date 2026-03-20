@@ -5,6 +5,7 @@ export type HttpMethod = 'GET' | 'POST';
 export type PodManifestVersion = '1';
 export type PodPackageSchemaVersion = '1';
 export type PodRegistryIndexSchemaVersion = '1';
+export type InstalledPackageStoreSchemaVersion = '1';
 
 export interface PodManifest {
   id: string;
@@ -138,6 +139,24 @@ export interface PodRegistryIndex {
   name: string;
   description?: string;
   entries: PodRegistryIndexEntry[];
+}
+
+export interface InstalledPackageMetadata {
+  alias: string;
+  packageName: string;
+  packageVersion: string;
+  podId: string;
+  installedAt: string;
+  source: RegistrySource;
+  sourcePath: string;
+  packageManifestPath: string;
+  materializedPath: string;
+  manifest: PodPackageManifest;
+}
+
+export interface InstalledPackageMetadataCollection {
+  schemaVersion: InstalledPackageStoreSchemaVersion;
+  packages: InstalledPackageMetadata[];
 }
 
 export interface JobRequest {

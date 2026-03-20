@@ -1,7 +1,8 @@
 import Fastify from 'fastify';
 
-import { planCreateFromAlias } from './create-flow.js';
+import { createFromAlias } from './create-flow.js';
 import { NotFoundError } from './errors.js';
+import { InstalledPackageStore } from './installed-package-store.js';
 import { JobManager } from './job-manager.js';
 import { PodController } from './pod-controller.js';
 import { PodRegistry } from './registry.js';
@@ -14,6 +15,9 @@ export interface AppDependencies {
   podController?: PodController;
   router?: SchedulerRouter;
   jobManager?: JobManager;
+  installedPackageStore?: InstalledPackageStore;
+  projectRoot?: string;
+  managedPackagesRoot?: string;
 }
 
 export const buildApp = (dependencies: AppDependencies = {}) => {
@@ -21,6 +25,7 @@ export const buildApp = (dependencies: AppDependencies = {}) => {
   const podController = dependencies.podController ?? new PodController(registry.list());
   const router = dependencies.router ?? new SchedulerRouter(registry, podController);
   const jobManager = dependencies.jobManager ?? new JobManager(registry, podController, router);
+  const installedPackageStore = dependencies.installedPackageStore ?? new InstalledPackageStore();
 
   const app = Fastify({ logger: false });
 
@@ -38,26 +43,39 @@ export const buildApp = (dependencies: AppDependencies = {}) => {
 
   app.post('/pods/create', async (request, reply) => {
     const payload = podCreateRequestSchema.parse(request.body);
-    const plan = planCreateFromAlias(registry, payload);
 
-    if (!plan) {
-      reply.code(404);
+    try {
+      const plan = createFromAlias(payload, {
+        registry,
+        podController,
+        installedPackageStore,
+        projectRoot: dependencies.projectRoot,
+        managedPackagesRoot: dependencies.managedPackagesRoot
+      });
+
+      reply.code(plan.materialization.status === 'installed' ? 201 : 202);
       return {
-        error: `Unknown pod alias: ${payload.alias}`,
-        knownAliases: registry.listAliases().map((entry) => entry.alias)
+        create: plan,
+        links: {
+          aliases: '/pods/aliases',
+          installed: '/pods/installed'
+        }
       };
-    }
-
-    reply.code(202);
-    return {
-      create: plan,
-      links: {
-        aliases: '/pods/aliases'
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        reply.code(404);
+        return {
+          error: error.message,
+          knownAliases: registry.listAliases().map((entry) => entry.alias)
+        };
       }
-    };
+
+      throw error;
+    }
   });
 
   app.get('/pods/aliases', async () => ({ aliases: registry.listAliases() }));
+  app.get('/pods/installed', async () => ({ packages: installedPackageStore.list() }));
 
   app.get('/pods/packages/upload-spec', async () => ({
     status: 'scaffolded',
@@ -107,5 +125,5 @@ export const buildApp = (dependencies: AppDependencies = {}) => {
     reply.code(500).send({ error: message });
   });
 
-  return { app, registry, podController, router, jobManager };
+  return { app, registry, podController, router, jobManager, installedPackageStore };
 };

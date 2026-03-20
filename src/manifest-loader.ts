@@ -1,4 +1,5 @@
 import type {
+  InstalledPackageMetadataCollection,
   PodManifest,
   PodPackageManifest,
   PodRegistryIndex,
@@ -6,6 +7,7 @@ import type {
   RegistrySource
 } from './types.js';
 import {
+  installedPackageMetadataCollectionSchema,
   podManifestSchema,
   podPackageManifestSchema,
   podRegistryIndexEntrySchema,
@@ -25,3 +27,6 @@ export const parsePodRegistryIndexEntry = (input: unknown): PodRegistryIndexEntr
 
 export const parsePodRegistryIndex = (input: unknown): PodRegistryIndex =>
   podRegistryIndexSchema.parse(input);
+
+export const parseInstalledPackageMetadataCollection = (input: unknown): InstalledPackageMetadataCollection =>
+  installedPackageMetadataCollectionSchema.parse(input);

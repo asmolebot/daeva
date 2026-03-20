@@ -1,6 +1,7 @@
 export * from './adapters.js';
 export * from './create-flow.js';
 export * from './errors.js';
+export * from './installed-package-store.js';
 export * from './job-manager.js';
 export * from './manifest-loader.js';
 export * from './manifests/builtin.js';
