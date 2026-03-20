@@ -48,6 +48,13 @@ export const registrySourceSchema = z.discriminatedUnion('kind', [
     packageManifestPath: z.string().min(1).optional()
   }),
   z.object({
+    kind: z.literal('git-repo'),
+    repoUrl: z.string().url(),
+    ref: z.string().min(1).optional(),
+    subpath: z.string().min(1).optional(),
+    packageManifestPath: z.string().min(1).optional()
+  }),
+  z.object({
     kind: z.literal('registry-index'),
     indexUrl: z.string().url(),
     alias: z.string().min(1)
@@ -81,7 +88,17 @@ export const jobRequestSchema = z.object({
 });
 
 export const podCreateRequestSchema = z.object({
-  alias: z.string().min(1)
+  alias: z.string().min(1).optional(),
+  source: registrySourceSchema.refine((source) => source.kind !== 'registry-index', {
+    message: 'Direct create only supports local-file, github-repo, or git-repo sources'
+  }).optional()
+}).superRefine((value, ctx) => {
+  if (!value.alias && !value.source) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Expected alias or source'
+    });
+  }
 });
 
 export const registerManifestSchema = podManifestSchema;

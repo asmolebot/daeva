@@ -1,4 +1,5 @@
 import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -27,6 +28,13 @@ class RecordingAdapter {
 const fixtureRoot = mkdtempSync(path.join(os.tmpdir(), 'asmo-pod-orch-fixtures-'));
 cpSync(path.resolve(process.cwd(), 'examples'), path.join(fixtureRoot, 'examples'), { recursive: true });
 
+const gitFixtureRoot = mkdtempSync(path.join(os.tmpdir(), 'asmo-pod-orch-git-fixture-'));
+const gitRepoRoot = path.join(gitFixtureRoot, 'whisper-package.git');
+execFileSync('git', ['init', gitRepoRoot], { stdio: 'pipe' });
+cpSync(path.join(fixtureRoot, 'examples', 'whisper-pod-package'), path.join(gitRepoRoot, 'bundle'), { recursive: true });
+execFileSync('git', ['-C', gitRepoRoot, 'add', '.'], { stdio: 'pipe' });
+execFileSync('git', ['-C', gitRepoRoot, '-c', 'user.name=Asmo', '-c', 'user.email=asmo@example.com', 'commit', '-m', 'fixture'], { stdio: 'pipe' });
+
 const installRoot = mkdtempSync(path.join(os.tmpdir(), 'asmo-pod-orch-installed-'));
 const storageFilePath = path.join(installRoot, 'installed-packages.json');
 const managedPackagesRoot = path.join(installRoot, 'materialized');
@@ -51,6 +59,7 @@ const { app } = buildApp({
 afterAll(async () => {
   await app.close();
   rmSync(fixtureRoot, { recursive: true, force: true });
+  rmSync(gitFixtureRoot, { recursive: true, force: true });
   rmSync(installRoot, { recursive: true, force: true });
 });
 
@@ -99,23 +108,52 @@ describe('HTTP API', () => {
     expect(persisted.packages[0].packageName).toBe('asmo-whisper');
   });
 
-  it('resolves a named github alias through POST /pods/create without materializing it yet', async () => {
+  it('materializes a direct git-repo source through POST /pods/create and exposes installed metadata', async () => {
     const response = await app.inject({
       method: 'POST',
       url: '/pods/create',
       payload: {
-        alias: 'comfy'
+        alias: 'git-whisper',
+        source: {
+          kind: 'git-repo',
+          repoUrl: `file://${gitRepoRoot}`,
+          subpath: 'bundle',
+          packageManifestPath: 'pod-package.json'
+        }
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+
+    expect(body.create.alias).toBe('git-whisper');
+    expect(body.create.resolvedSource.kind).toBe('git-repo');
+    expect(body.create.materialization.status).toBe('installed');
+    expect(body.create.materialization.installedPackage.source.kind).toBe('git-repo');
+    expect(body.create.materialization.installedPackage.manifest.pod.id).toBe('whisper');
+
+    const installedResponse = await app.inject({ method: 'GET', url: '/pods/installed' });
+    expect(installedResponse.statusCode).toBe(200);
+    const installedBody = installedResponse.json();
+    expect(installedBody.packages.map((pkg: { alias: string }) => pkg.alias)).toEqual(['git-whisper', 'whisper']);
+  });
+
+  it('resolves a named registry-index alias through POST /pods/create without materializing it yet', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/pods/create',
+      payload: {
+        alias: 'vision'
       }
     });
 
     expect(response.statusCode).toBe(202);
     const body = response.json();
 
-    expect(body.create.alias).toBe('comfy');
-    expect(body.create.registryEntry.packageName).toBe('asmo-comfy-community');
-    expect(body.create.resolvedSource.kind).toBe('github-repo');
+    expect(body.create.alias).toBe('vision');
+    expect(body.create.resolvedSource.kind).toBe('registry-index');
     expect(body.create.materialization.status).toBe('resolved');
-    expect(body.create.materialization.nextAction).toContain('Clone asmoai/asmo-comfy-community-pod');
+    expect(body.create.materialization.nextAction).toContain('Fetch registry index');
   });
 
   it('returns a useful 404 when POST /pods/create receives an unknown alias', async () => {

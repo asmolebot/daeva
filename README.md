@@ -9,8 +9,8 @@ Current focus:
 - first-class built-ins for ComfyUI/comfyapi, Whisper, and OCR/Vision
 - start/stop/switch behavior for pods that contend for the same GPU slot
 - Phase 3 package spec groundwork for portable pod packages
-- registry source modeling + local alias/index groundwork for future install flows
-- `POST /pods/create` now materializes validated `local-file` packages into managed storage and records installed metadata
+- registry source modeling + local alias/index groundwork for package install flows
+- `POST /pods/create` now materializes validated `local-file`, `github-repo`, and direct `git-repo` packages into managed storage and records installed metadata
 
 This is intentionally not a giant orchestration cathedral. It's the practical first draft: coherent, testable, and easy to extend.
 
@@ -176,13 +176,13 @@ Example response shape:
 Resolve a named registry alias into the source that a future install/materialization flow should use.
 
 Current scope is intentionally narrow:
-- accepts a named alias only
-- resolves through the registry/index layer
-- **materializes and installs** `local-file` aliases immediately
-- returns a planning response for `github-repo` and delegated `registry-index` aliases
-- does **not** yet clone Git repos or accept archive uploads
+- accepts either a named alias or a direct `source` descriptor
+- resolves aliases through the registry/index layer
+- **materializes and installs** `local-file`, `github-repo`, and direct `git-repo` sources immediately
+- still returns a planning response for delegated `registry-index` aliases
+- does **not** yet accept archive uploads
 
-Example request:
+Example alias request:
 
 ```json
 {
@@ -220,7 +220,23 @@ Example response shape for a `local-file` alias:
 }
 ```
 
-For `github-repo` and delegated `registry-index` aliases, the route still returns a planning response with `materialization.status: "resolved"` and a `nextAction` string.
+Example direct Git request:
+
+```json
+{
+  "alias": "git-whisper",
+  "source": {
+    "kind": "git-repo",
+    "repoUrl": "file:///tmp/git-whisper-package",
+    "subpath": "bundle",
+    "packageManifestPath": "pod-package.json"
+  }
+}
+```
+
+For `github-repo` aliases and direct `git-repo` requests, the server performs a first-pass `git clone`, optionally checks out `ref`, reads the package manifest from `subpath`/`packageManifestPath`, validates it, then copies that package directory into managed storage under `.data/pod-packages/<alias>` before recording installed metadata.
+
+Delegated `registry-index` aliases still return a planning response with `materialization.status: "resolved"` and a `nextAction` string.
 
 If the alias is unknown, the route returns `404` with the known aliases to help callers recover.
 
@@ -488,7 +504,11 @@ Each alias can resolve to one of three source models:
   - useful for built-in packages, checked-in examples, or pre-seeded host content
 - `github-repo`
   - points at an `owner/repo` GitHub source, with optional `ref`, `subpath`, and `packageManifestPath`
+  - `POST /pods/create` now clones these into managed storage during installation
   - this is the intended default for community pod packages
+- `git-repo`
+  - points at an arbitrary Git URL with optional `ref`, `subpath`, and `packageManifestPath`
+  - useful for local fixtures, self-hosted Git, or non-GitHub repos while reusing the same materialization path
 - `registry-index`
   - points at another registry index URL plus an alias to resolve there
   - useful for delegating from a local shorthand like `vision` to a broader remote catalog
@@ -556,7 +576,7 @@ Near-term:
 - health checks and pod warmup policies
 
 Planned packaging feature:
-- extend materialization beyond `local-file` to git/archive sources
+- extend materialization from the current first-pass git/local flows to archive uploads and richer remote registry fetches
 - build on the installed package metadata store for richer lifecycle management
 - optionally build/install the pod on the local host
 
@@ -567,7 +587,7 @@ This first pass intentionally keeps a few things stubbed/small:
 - no persistent job store
 - no auth/rate limiting
 - pod lifecycle commands are described in manifests but not executed yet
-- `POST /pods/create` fully materializes only `local-file` aliases today; Git clone and archive upload flows are still future work
+- `POST /pods/create` now fully materializes local packages plus first-pass GitHub/direct Git sources, but archive upload flows are still future work
 - only FIFO scheduling for now
 
 ## License

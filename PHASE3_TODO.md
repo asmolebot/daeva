@@ -69,18 +69,20 @@ The package should describe:
 - [x] Add `POST /pods/create` route
   - Added a narrow planning endpoint in `src/server.ts` that validates `{ alias }`, resolves it through `PodRegistry`, and returns a structured create plan instead of pretending install exists.
   - Added companion `GET /pods/aliases` route so clients can discover valid aliases before calling create.
-- [ ] Support create from Git URL
+- [x] Support create from Git URL
+  - `POST /pods/create` now accepts either a registry alias or a direct `{ source }` payload.
+  - Added first-pass `git-repo` support for arbitrary Git URLs and activated install/materialization for existing `github-repo` aliases.
 - [ ] Support create from uploaded archive
 - [x] Support create from named registry alias
   - Added `src/create-flow.ts` with `planCreateFromAlias()` so alias resolution + next-step messaging lives in one place and can later branch into real materialization handlers.
-  - Response now includes the resolved registry entry, normalized source descriptor, and a human/coherent `materialization.nextAction` string.
+  - Alias-based creates now either materialize/install (`local-file`, `github-repo`) or return a delegated plan (`registry-index`).
 - [x] Unpack/clone package into managed local storage
-  - Implemented the `local-file` branch only: `POST /pods/create` now copies the resolved package directory into `.data/pod-packages/<alias>`.
-  - Git clone and archive extraction are intentionally still pending.
+  - `POST /pods/create` now copies local package directories into `.data/pod-packages/<alias>` and does a first-pass `git clone` + copy for GitHub/direct Git sources.
+  - Materialization stays intentionally narrow: clone/package copy only, no archive extraction yet.
 - [x] Validate package manifest before install
-  - Local materialization now reads `pod-package.json` (or the alias-provided manifest path) and validates it with the existing `podPackageManifestSchema` via `parsePodPackageManifest()` before persisting install metadata.
+  - Local and Git materialization now read `pod-package.json` (or the source-provided manifest path) and validate it with the existing `podPackageManifestSchema` via `parsePodPackageManifest()` before persisting install metadata.
 - [x] Persist installed pod metadata
-  - Added a simple JSON-backed installed package store at `.data/installed-packages.json` plus typed validation for the stored records.
+  - Installed package metadata continues to live in `.data/installed-packages.json` with the same schema/store shape for local and Git-backed installs.
 
 ### D. Runtime/install improvements
 - [ ] Split install/start/stop/build semantics more cleanly in manifests

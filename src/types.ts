@@ -112,6 +112,14 @@ export interface GithubRepoRegistrySource {
   packageManifestPath?: string;
 }
 
+export interface GitRepoRegistrySource {
+  kind: 'git-repo';
+  repoUrl: string;
+  ref?: string;
+  subpath?: string;
+  packageManifestPath?: string;
+}
+
 export interface RegistryIndexRegistrySource {
   kind: 'registry-index';
   indexUrl: string;
@@ -121,6 +129,7 @@ export interface RegistryIndexRegistrySource {
 export type RegistrySource =
   | LocalFileRegistrySource
   | GithubRepoRegistrySource
+  | GitRepoRegistrySource
   | RegistryIndexRegistrySource;
 
 export interface PodRegistryIndexEntry {
