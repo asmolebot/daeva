@@ -236,4 +236,53 @@ describe('HTTP API', () => {
     expect(resultResponse.statusCode).toBe(200);
     expect(resultResponse.json().result.podId).toBe('whisper');
   });
+
+  it('exposes a coherent status snapshot across runtime, packages, scheduler, and recent jobs', async () => {
+    const response = await app.inject({ method: 'GET', url: '/status' });
+    expect(response.statusCode).toBe(200);
+
+    const body = response.json();
+    expect(body.runtime.summary.totalPods).toBe(3);
+    expect(body.runtime.pods.find((pod: { podId: string }) => pod.podId === 'whisper').container).toEqual({
+      declaredName: null,
+      inferredFrom: null,
+      detection: 'manifest-hint'
+    });
+    expect(body.packages.summary.installedPackages).toBe(3);
+    expect(body.packages.summary.registryAliases).toBe(3);
+    expect(body.packages.summary.registrySourceKinds).toEqual([
+      { kind: 'github-repo', count: 1 },
+      { kind: 'local-file', count: 1 },
+      { kind: 'registry-index', count: 1 }
+    ]);
+    expect(body.scheduler.summary.exclusivityGroups).toBeGreaterThanOrEqual(1);
+    expect(body.jobs.summary.totalTrackedJobs).toBeGreaterThanOrEqual(1);
+  });
+
+  it('exposes focused runtime, package, scheduler, and recent job status endpoints', async () => {
+    const runtimeResponse = await app.inject({ method: 'GET', url: '/status/runtime' });
+    expect(runtimeResponse.statusCode).toBe(200);
+    const runtimeBody = runtimeResponse.json();
+    expect(runtimeBody.summary.runningPods).toBeGreaterThanOrEqual(1);
+    expect(runtimeBody.pods[0].runtime.baseUrl).toContain('http://127.0.0.1:');
+
+    const packagesResponse = await app.inject({ method: 'GET', url: '/status/packages' });
+    expect(packagesResponse.statusCode).toBe(200);
+    const packagesBody = packagesResponse.json();
+    expect(packagesBody.installedPackages.map((pkg: { alias: string }) => pkg.alias)).toEqual(['archive-whisper', 'git-whisper', 'whisper']);
+    expect(packagesBody.registry.indexes[0].entryCount).toBe(3);
+
+    const schedulerResponse = await app.inject({ method: 'GET', url: '/status/scheduler' });
+    expect(schedulerResponse.statusCode).toBe(200);
+    const schedulerBody = schedulerResponse.json();
+    expect(schedulerBody.summary.processing).toBe(false);
+    expect(schedulerBody.exclusivity.find((group: { group: string }) => group.group === 'gpu-0').podIds).toEqual(['comfyapi', 'whisper', 'ocr-vision']);
+
+    const jobsResponse = await app.inject({ method: 'GET', url: '/status/jobs/recent?limit=1' });
+    expect(jobsResponse.statusCode).toBe(200);
+    const jobsBody = jobsResponse.json();
+    expect(jobsBody.summary.limit).toBe(1);
+    expect(jobsBody.jobs).toHaveLength(1);
+    expect(jobsBody.jobs[0].status).toBe('completed');
+  });
 });

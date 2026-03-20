@@ -285,6 +285,103 @@ Example response shape:
 
 The installed metadata store is currently a small JSON file under `.data/installed-packages.json`, which keeps this phase simple while giving later Git/archive installers a stable place to record installs.
 
+### `GET /status`
+Return a combined observability snapshot for the current orchestrator process.
+
+Response sections:
+- `runtime` — orchestrator-tracked pod lifecycle state, runtime URLs, and best-effort container name hints derived from manifest commands when available
+- `packages` — installed packages plus registry alias/index summary
+- `scheduler` — queue depth, processing flag, and exclusivity-group occupancy
+- `jobs` — recent in-memory job history summary
+
+This is the easiest endpoint for a UI or operator to poll when it wants a coherent "what's going on right now?" view.
+
+### `GET /status/runtime`
+Return the active runtime view for each registered pod.
+
+Example response shape:
+
+```json
+{
+  "summary": {
+    "totalPods": 3,
+    "runningPods": 1,
+    "busyPods": 0,
+    "exclusivityGroups": 1
+  },
+  "pods": [
+    {
+      "podId": "whisper",
+      "nickname": "Whisper",
+      "status": "running",
+      "currentJobId": null,
+      "lastStartedAt": "2026-03-20T22:10:00.000Z",
+      "lastStoppedAt": null,
+      "exclusivityGroup": "gpu-0",
+      "capabilities": ["speech-to-text"],
+      "runtime": {
+        "kind": "http-service",
+        "baseUrl": "http://127.0.0.1:8001",
+        "submitPath": "/transcribe",
+        "healthPath": "/health",
+        "healthUrl": "http://127.0.0.1:8001/health",
+        "method": "POST"
+      },
+      "container": {
+        "declaredName": "asmo-whisper",
+        "inferredFrom": "startup.command",
+        "detection": "manifest-hint"
+      }
+    }
+  ]
+}
+```
+
+Important nuance: this is currently the orchestrator's view of runtime state plus manifest-derived container hints. It is **not** yet a live Podman inspection surface.
+
+### `GET /status/packages`
+Return installed package metadata together with registry alias/index visibility.
+
+Useful fields:
+- `summary.registrySourceKinds` — counts alias sources by kind (`local-file`, `github-repo`, `registry-index`, etc.)
+- `installedPackages` — persisted installed package records from `.data/installed-packages.json`
+- `registry.aliases` — the alias resolution table currently loaded into `PodRegistry`
+- `registry.indexes` — registry index summaries (name, description, entry count)
+
+This complements `GET /pods/installed` by exposing the registry side of the picture instead of only the install store.
+
+### `GET /status/scheduler`
+Return current scheduler/exclusivity state.
+
+Example response shape:
+
+```json
+{
+  "summary": {
+    "queueDepth": 0,
+    "processing": false,
+    "exclusivityGroups": 1
+  },
+  "exclusivity": [
+    {
+      "group": "gpu-0",
+      "podIds": ["comfyapi", "whisper", "ocr-vision"],
+      "runningPodIds": ["whisper"],
+      "busyPodIds": [],
+      "activeJobIds": []
+    }
+  ]
+}
+```
+
+### `GET /status/jobs/recent`
+Return a recent in-memory job history summary.
+
+Optional query params:
+- `limit` — max number of recent jobs to include (default `10`)
+
+This is intentionally a light summary endpoint, not a durable audit log.
+
 ### `GET /pods/packages/upload-spec`
 Scaffolded endpoint describing the future remote package upload flow.
 

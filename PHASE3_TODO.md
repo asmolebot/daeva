@@ -100,11 +100,18 @@ The package should describe:
 - [ ] Add better error payloads and job failure reasons
 
 ### F. Richer status
-- [ ] Add endpoint for active runtime/container status
+- [x] Add endpoint for active runtime/container status
+  - Added `GET /status/runtime` plus aggregate `GET /status` snapshot output.
+  - Runtime status now exposes orchestrator-tracked lifecycle state, runtime URLs, last start/stop timestamps, and best-effort manifest-derived container name hints.
+  - Kept scope intentionally honest: this is not live Podman inspection yet.
 - [x] Add endpoint for installed packages and registry sources
-  - Added `GET /pods/installed` and also linked installed metadata from `POST /pods/create` responses for successfully materialized local packages.
-- [ ] Add endpoint for scheduler/exclusivity state
-- [ ] Add endpoint for recent job history summary
+  - Added `GET /status/packages` to complement `GET /pods/installed` with registry alias/index visibility and source-kind summaries.
+  - `GET /pods/installed` remains the narrow install-store view; `/status/packages` is the broader observability surface.
+- [x] Add endpoint for scheduler/exclusivity state
+  - Added `GET /status/scheduler` with queue depth, processing flag, exclusivity groups, running pod ids, busy pod ids, and active job ids.
+- [x] Add endpoint for recent job history summary
+  - Added `GET /status/jobs/recent?limit=N` and included recent job summary in aggregate `GET /status`.
+  - Job history is intentionally in-memory/ephemeral for now; this is a visibility surface, not a durable audit log.
 
 ### G. MCP/client follow-up
 - [ ] Define thin MCP server surface over the HTTP API

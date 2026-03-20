@@ -45,6 +45,20 @@ export class JobManager {
     return [...this.jobs.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
+  listRecentJobs(limit = 10): JobRecord[] {
+    return [...this.jobs.values()]
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, limit);
+  }
+
+  getQueueDepth(): number {
+    return this.queue.length;
+  }
+
+  isProcessing(): boolean {
+    return this.processing;
+  }
+
   getJob(id: string): JobRecord {
     const job = this.jobs.get(id);
     if (!job) {

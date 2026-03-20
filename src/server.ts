@@ -8,6 +8,13 @@ import { PodController } from './pod-controller.js';
 import { PodRegistry } from './registry.js';
 import { SchedulerRouter } from './router.js';
 import { registerManifestSchema, jobRequestSchema, podCreateRequestSchema } from './schemas.js';
+import {
+  buildPackageStatus,
+  buildRecentJobStatus,
+  buildRuntimeStatus,
+  buildSchedulerStatus,
+  buildStatusSnapshot
+} from './status.js';
 import type { PodManifest } from './types.js';
 
 export interface AppDependencies {
@@ -76,6 +83,17 @@ export const buildApp = (dependencies: AppDependencies = {}) => {
 
   app.get('/pods/aliases', async () => ({ aliases: registry.listAliases() }));
   app.get('/pods/installed', async () => ({ packages: installedPackageStore.list() }));
+
+  app.get('/status', async () => buildStatusSnapshot(registry, podController, jobManager, installedPackageStore));
+  app.get('/status/runtime', async () => buildRuntimeStatus(registry, podController));
+  app.get('/status/packages', async () => buildPackageStatus(registry, installedPackageStore));
+  app.get('/status/scheduler', async () => buildSchedulerStatus(registry, podController, jobManager));
+  app.get('/status/jobs/recent', async (request) => {
+    const query = request.query as { limit?: string | number };
+    const rawLimit = typeof query.limit === 'string' ? Number.parseInt(query.limit, 10) : query.limit;
+    const limit = Number.isFinite(rawLimit) && Number(rawLimit) > 0 ? Number(rawLimit) : 10;
+    return buildRecentJobStatus(jobManager, limit);
+  });
 
   app.get('/pods/packages/upload-spec', async () => ({
     status: 'scaffolded',
