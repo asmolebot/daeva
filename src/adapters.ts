@@ -14,6 +14,12 @@ export interface PodAdapter {
 
 export class HttpPodAdapter implements PodAdapter {
   async execute(manifest: PodManifest, request: JobRequest, context?: RunContext): Promise<JobCompletedResult> {
+    if (manifest.runtime.kind !== 'http-service') {
+      throw new AppError(
+        `HttpPodAdapter cannot handle runtime kind "${manifest.runtime.kind}" for pod ${manifest.id}`,
+        { code: 'ADAPTER_RUNTIME_MISMATCH', type: 'internal', retriable: false }
+      );
+    }
     const url = `${manifest.runtime.baseUrl}${manifest.runtime.submitPath}`;
     const method = manifest.runtime.method ?? 'POST';
     const capability = request.capability ?? inferCapabilityForJobType(request.type);

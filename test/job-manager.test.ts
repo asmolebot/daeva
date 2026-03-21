@@ -19,12 +19,7 @@ class RecordingAdapter {
       pod: {
         id: manifest.id,
         nickname: manifest.nickname,
-        runtime: {
-          kind: manifest.runtime.kind,
-          baseUrl: manifest.runtime.baseUrl,
-          submitPath: manifest.runtime.submitPath,
-          method: manifest.runtime.method ?? 'POST'
-        }
+        runtime: manifest.runtime
       },
       request: {
         type: request.type,

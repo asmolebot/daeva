@@ -342,12 +342,7 @@ export const normalizeCompletedResult = (manifest: PodManifest, request: JobRequ
   pod: {
     id: manifest.id,
     nickname: manifest.nickname,
-    runtime: {
-      kind: manifest.runtime.kind,
-      baseUrl: manifest.runtime.baseUrl,
-      submitPath: manifest.runtime.submitPath,
-      method: manifest.runtime.method ?? 'POST'
-    }
+    runtime: manifest.runtime
   },
   request: createCapabilityContract(request, capability),
   output: normalizeOutput(capability, response)
@@ -359,12 +354,7 @@ export const createFailedResult = (manifest: PodManifest | undefined, request: J
     ? {
         id: manifest.id,
         nickname: manifest.nickname,
-        runtime: {
-          kind: manifest.runtime.kind,
-          baseUrl: manifest.runtime.baseUrl,
-          submitPath: manifest.runtime.submitPath,
-          method: manifest.runtime.method ?? 'POST'
-        }
+        runtime: manifest.runtime
       }
     : undefined,
   request: capability ? createCapabilityContract(request, capability) : undefined,

@@ -9,6 +9,9 @@ import type { JobRecord, PodManifest, PodRegistryIndexEntry } from './types.js';
 const defaultRuntimeInspector = new PodmanRuntimeInspector();
 
 const buildHealthUrl = (manifest: PodManifest): string | undefined => {
+  if (manifest.runtime.kind !== 'http-service') {
+    return undefined;
+  }
   if (!manifest.runtime.healthPath) {
     return undefined;
   }
@@ -47,14 +50,21 @@ export const buildRuntimeStatus = (
       lastStoppedAt: entry.lastStoppedAt ?? null,
       exclusivityGroup: entry.manifest.exclusivityGroup ?? null,
       capabilities: entry.manifest.capabilities,
-      runtime: {
-        kind: entry.manifest.runtime.kind,
-        baseUrl: entry.manifest.runtime.baseUrl,
-        submitPath: entry.manifest.runtime.submitPath,
-        healthPath: entry.manifest.runtime.healthPath ?? null,
-        healthUrl: buildHealthUrl(entry.manifest) ?? null,
-        method: entry.manifest.runtime.method ?? 'POST'
-      },
+      runtime: entry.manifest.runtime.kind === 'http-service'
+        ? {
+            kind: entry.manifest.runtime.kind,
+            baseUrl: entry.manifest.runtime.baseUrl,
+            submitPath: entry.manifest.runtime.submitPath,
+            healthPath: entry.manifest.runtime.healthPath ?? null,
+            healthUrl: buildHealthUrl(entry.manifest) ?? null,
+            method: entry.manifest.runtime.method ?? 'POST'
+          }
+        : {
+            kind: entry.manifest.runtime.kind,
+            host: entry.manifest.runtime.host,
+            device: entry.manifest.runtime.device ?? null,
+            healthUrl: null
+          },
       container: container
         ? {
             declaredName,

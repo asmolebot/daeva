@@ -3,7 +3,16 @@ import { promisify } from 'node:util';
 
 import { SchedulingError } from './errors.js';
 import { applyTemplateToCommand, applyTemplateToEnv, buildContext, type TemplateContext } from './path-template.js';
-import type { PodLifecycleStatus, PodManifest } from './types.js';
+import {
+  clearRpodPodId,
+  executeViaRpod,
+  getRpodPodId,
+  rpodIsRunning,
+  rpodRun,
+  rpodStop,
+  setRpodPodId
+} from './rpod-adapter.js';
+import type { PodLifecycleStatus, PodManifest, RpodRuntime } from './types.js';
 import { sleep } from './utils.js';
 
 const exec = promisify(execCb);
@@ -74,7 +83,15 @@ export class PodController {
     }
 
     state.status = 'starting';
-    await this.runLifecycleCommand(manifest.startup);
+
+    if (manifest.runtime.kind === 'rpod') {
+      const rpodRuntime = manifest.runtime as RpodRuntime;
+      const podId = await rpodRun(rpodRuntime);
+      setRpodPodId(manifest.id, podId);
+    } else {
+      await this.runLifecycleCommand(manifest.startup);
+    }
+
     await this.waitForHealth(manifest);
     state.status = 'running';
     state.lastStartedAt = new Date().toISOString();
@@ -91,7 +108,18 @@ export class PodController {
     }
 
     state.status = 'stopping';
-    await this.runLifecycleCommand(manifest.shutdown);
+
+    if (manifest.runtime.kind === 'rpod') {
+      const rpodRuntime = manifest.runtime as RpodRuntime;
+      const podId = getRpodPodId(manifest.id);
+      if (podId) {
+        await rpodStop(rpodRuntime, podId);
+        clearRpodPodId(manifest.id);
+      }
+    } else {
+      await this.runLifecycleCommand(manifest.shutdown);
+    }
+
     state.status = 'stopped';
     state.lastStoppedAt = new Date().toISOString();
   }
@@ -156,6 +184,27 @@ export class PodController {
   }
 
   private async waitForHealth(manifest: PodManifest): Promise<void> {
+    if (manifest.runtime.kind === 'rpod') {
+      // For rpod, poll rpod ps until the pod shows as running
+      const rpodRuntime = manifest.runtime as RpodRuntime;
+      const podId = getRpodPodId(manifest.id);
+      if (!podId) return; // nothing to wait for without a pod-id
+
+      const timeoutMs = 30000;
+      const intervalMs = 1000;
+      const deadline = Date.now() + timeoutMs;
+
+      while (Date.now() < deadline) {
+        if (await rpodIsRunning(rpodRuntime, podId)) {
+          return;
+        }
+        await sleep(intervalMs);
+      }
+      throw new SchedulingError(
+        `rpod health check timed out for pod ${manifest.id} (remote podId: ${podId}) on host ${rpodRuntime.host}`
+      );
+    }
+
     const healthPath = manifest.runtime.healthPath;
     if (!healthPath) return;
 
@@ -175,6 +224,13 @@ export class PodController {
   }
 
   private async isHealthy(manifest: PodManifest): Promise<boolean> {
+    if (manifest.runtime.kind === 'rpod') {
+      const rpodRuntime = manifest.runtime as RpodRuntime;
+      const podId = getRpodPodId(manifest.id);
+      if (!podId) return false;
+      return rpodIsRunning(rpodRuntime, podId);
+    }
+
     const healthPath = manifest.runtime.healthPath;
     if (!healthPath) {
       return true;
@@ -186,5 +242,16 @@ export class PodController {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Execute a job via the rpod adapter. Only valid for rpod-runtime manifests.
+   * Returns the normalized job result.
+   */
+  async executeRpodJob(manifest: PodManifest, request: import('./types.js').JobRequest, context?: import('./types.js').RunContext): Promise<import('./types.js').JobCompletedResult> {
+    if (manifest.runtime.kind !== 'rpod') {
+      throw new SchedulingError(`executeRpodJob called on non-rpod manifest ${manifest.id}`);
+    }
+    return executeViaRpod(manifest, request, context);
   }
 }

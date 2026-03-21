@@ -88,6 +88,16 @@ The package should describe:
   - Installed package metadata continues to live in `.data/installed-packages.json` with the same schema/store shape for local, Git-backed, and uploaded-archive installs.
 
 ### D. Runtime/install improvements
+- [x] Add rpod remote GPU pod runtime
+  - Added `RpodRuntime` interface (kind, command, host, device, execOptions) and `RpodExecOptions` to `src/types.ts`.
+  - `PodManifest.runtime` is now a `PodRuntime` union (`http-service | rpod`).
+  - Added `src/rpod-adapter.ts` wrapping rpod CLI: `rpodDiscover`, `rpodRun`, `rpodStop`, `rpodExec`, `rpodPs`,
+    `rpodIsRunning`, `executeViaRpod`, and a pod-id store (`setRpodPodId`/`getRpodPodId`/`clearRpodPodId`).
+  - Updated `PodController.start/stop/waitForHealth/isHealthy` to branch on `runtime.kind === 'rpod'`.
+  - Added `PodController.executeRpodJob()` for rpod-backed job dispatch.
+  - Updated `src/schemas.ts` with `rpodRuntimeSchema` and `podRuntimeSchema` discriminated union.
+  - Updated `src/adapters.ts`, `src/status.ts`, `src/job-contracts.ts` for the runtime union.
+  - Added `test/rpod-adapter.test.ts` (18 tests) and `test/rpod-controller.test.ts` (7 tests).
 - [x] Split install/start/stop/build semantics more cleanly in manifests
   - Added `install` and `build` as distinct optional lifecycle phases alongside existing `startup`/`shutdown` on `PodManifest`.
   - Each phase is documented with its own JSDoc: install = one-time setup (pull/config); build = image build; startup = bring pod up; shutdown = graceful stop.
@@ -156,6 +166,12 @@ The package should describe:
   - Flags: `--skip-podman`, `--skip-service`, `--skip-node-check`, `--dry-run`, `--port`, `--data-dir`,
     `--install-dir`, `--user`.
   - Installs from source tree or npm global; writes `.env`; creates systemd user service unit.
+- [x] Cross-platform install scripts
+  - `scripts/install-linux.sh` — apt/dnf/yum/zypper/pacman + snap/flatpak fallback; systemd user service.
+  - `scripts/install-macos.sh` — Homebrew + optional Podman Desktop; launchd user agent plist.
+  - `scripts/install-windows.ps1` — winget/choco; Podman Desktop; NSSM service or Scheduled Task fallback.
+  - All scripts support: `--skip-podman`, `--skip-service`, `--dry-run`, `--non-interactive`, `--help`,
+    `--port`, `--data-dir`, `--install-dir`. Prereq checks and clear final start command output.
 - [x] Split sample pod packages into separate reusable repos
   - Added `examples/pod-package-repos/` with a plan README and stubs for three packages:
     - `asmo-whisper-pod/` — speech-to-text (Whisper/faster-whisper)

@@ -7,6 +7,46 @@ export type PodPackageSchemaVersion = '1';
 export type PodRegistryIndexSchemaVersion = '1';
 export type InstalledPackageStoreSchemaVersion = '1';
 
+/** Runtime options forwarded to rpod exec calls. */
+export interface RpodExecOptions {
+  /** Timeout in seconds for rpod exec commands. */
+  timeoutSecs?: number;
+  /** Extra environment variables forwarded to the remote pod. */
+  env?: Record<string, string>;
+}
+
+/** HTTP-service runtime — a local or remote HTTP endpoint. */
+export interface HttpServiceRuntime {
+  kind: 'http-service';
+  baseUrl: string;
+  healthPath?: string;
+  submitPath: string;
+  resultPath?: string;
+  method?: HttpMethod;
+}
+
+/**
+ * rpod runtime — executes jobs inside a remote GPU pod via the `rpod` CLI.
+ * `rpod run` starts the pod, `rpod exec` forwards job payloads, `rpod stop`
+ * tears it down, and `rpod ps` / `rpod discover` are used for health checks.
+ */
+export interface RpodRuntime {
+  kind: 'rpod';
+  /** The rpod CLI binary or full path (default: "rpod"). */
+  command?: string;
+  /** Remote host identifier passed to rpod (e.g. a hostname or pod-pool alias). */
+  host: string;
+  /**
+   * GPU/device allocation spec forwarded to `rpod run --device`.
+   * Examples: "gpu:0", "gpu:all", "cuda:0".
+   */
+  device?: string;
+  /** Optional per-exec options. */
+  execOptions?: RpodExecOptions;
+}
+
+export type PodRuntime = HttpServiceRuntime | RpodRuntime;
+
 export interface PodManifest {
   id: string;
   nickname: string;
@@ -18,14 +58,7 @@ export interface PodManifest {
     readme?: string;
     repository?: string;
   };
-  runtime: {
-    kind: 'http-service';
-    baseUrl: string;
-    healthPath?: string;
-    submitPath: string;
-    resultPath?: string;
-    method?: HttpMethod;
-  };
+  runtime: PodRuntime;
   /**
    * install: One-time setup step run during package install (pull images,
    * create directories, write config). Does NOT start the pod.
@@ -380,12 +413,7 @@ export interface JobCompletedResult {
   pod?: {
     id: string;
     nickname: string;
-    runtime: {
-      kind: 'http-service';
-      baseUrl: string;
-      submitPath: string;
-      method: HttpMethod;
-    };
+    runtime: PodRuntime;
   };
   request?: JobCapabilityContract;
   output: JobOutput;

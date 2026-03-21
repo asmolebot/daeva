@@ -22,6 +22,36 @@ const safeSourceFilenameSchema = z.string().min(1).max(255).refine((value) => va
 
 const metadataRecordSchema = z.record(z.unknown());
 
+const httpServiceRuntimeSchema = z.object({
+  kind: z.literal('http-service'),
+  baseUrl: z.string().url(),
+  healthPath: z.string().optional(),
+  submitPath: z.string().min(1),
+  resultPath: z.string().optional(),
+  method: httpMethodSchema.optional()
+});
+
+const rpodExecOptionsSchema = z.object({
+  timeoutSecs: z.number().int().positive().optional(),
+  env: z.record(z.string()).optional()
+});
+
+const rpodRuntimeSchema = z.object({
+  kind: z.literal('rpod'),
+  /** rpod CLI binary name or full path (default: "rpod") */
+  command: z.string().min(1).optional(),
+  /** Remote host identifier passed to rpod */
+  host: z.string().min(1),
+  /** GPU/device allocation spec (e.g. "gpu:0", "cuda:0") */
+  device: z.string().min(1).optional(),
+  execOptions: rpodExecOptionsSchema.optional()
+});
+
+const podRuntimeSchema = z.discriminatedUnion('kind', [
+  httpServiceRuntimeSchema,
+  rpodRuntimeSchema
+]);
+
 export const podManifestSchema = z.object({
   id: z.string().min(1),
   nickname: z.string().min(1),
@@ -33,14 +63,7 @@ export const podManifestSchema = z.object({
     readme: z.string().url().optional(),
     repository: z.string().url().optional()
   }),
-  runtime: z.object({
-    kind: z.literal('http-service'),
-    baseUrl: z.string().url(),
-    healthPath: z.string().optional(),
-    submitPath: z.string().min(1),
-    resultPath: z.string().optional(),
-    method: httpMethodSchema.optional()
-  }),
+  runtime: podRuntimeSchema,
   /**
    * install: Run once during package install. Intended for one-time setup
    * (pulling images, building, creating config files). Does NOT start the pod.
