@@ -142,10 +142,27 @@ The package should describe:
   - Job history is intentionally in-memory/ephemeral for now; this is a visibility surface, not a durable audit log.
 
 ### G. MCP/client follow-up
-- [ ] Define thin MCP server surface over the HTTP API
-- [ ] Define client skill shape for OpenClaw
-- [ ] Add install script for server host setup (with flags to skip Podman/service setup)
-- [ ] Split sample pod packages into separate reusable repos
+- [x] Define thin MCP server surface over the HTTP API
+  - Added `src/mcp-server.ts` with a stdio JSON-RPC 2.0 MCP server (no external deps).
+  - Exposes 8 tools: `list_pods`, `list_aliases`, `list_installed`, `get_status`, `get_scheduler`,
+    `enqueue_job`, `get_job`, `create_pod`. All proxy to the orchestrator HTTP API.
+  - Added `src/mcp-cli.ts` entry point; registered `asmo-pod-orchestrator-mcp` bin in `package.json`.
+  - Launch: `node dist/src/mcp-cli.js [--base-url http://127.0.0.1:8787]`
+- [x] Define client skill shape for OpenClaw
+  - Added `~/asmo/skills/asmo-pod-orchestrator/SKILL.md` with endpoint reference, curl examples,
+    job type/capability table, MCP client config snippet, and troubleshooting guidance.
+- [x] Add install script for server host setup (with flags to skip Podman/service setup)
+  - Added `scripts/install-server.sh` (chmod +x).
+  - Flags: `--skip-podman`, `--skip-service`, `--skip-node-check`, `--dry-run`, `--port`, `--data-dir`,
+    `--install-dir`, `--user`.
+  - Installs from source tree or npm global; writes `.env`; creates systemd user service unit.
+- [x] Split sample pod packages into separate reusable repos
+  - Added `examples/pod-package-repos/` with a plan README and stubs for three packages:
+    - `asmo-whisper-pod/` — speech-to-text (Whisper/faster-whisper)
+    - `asmo-comfyui-pod/` — image generation (ComfyUI)
+    - `asmo-vision-pod/` — vision + OCR (Ollama/llava or PaddleOCR)
+  - Each stub has a `pod-package.json` + `README.md` ready to become an independent repo.
+  - Parent `README.md` documents how the registry index should be updated when repos go live.
 
 ## Suggested working order
 

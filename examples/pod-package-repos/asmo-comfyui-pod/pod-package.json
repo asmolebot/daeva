@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "1",
+  "packageType": "pod-package",
+  "name": "asmo-comfyui-pod",
+  "version": "0.1.0",
+  "description": "Portable pod package for ComfyUI image generation via asmo-pod-orchestrator.",
+  "pod": {
+    "id": "comfyui",
+    "nickname": "ComfyUI",
+    "description": "Image generation pod backed by ComfyUI.",
+    "manifestVersion": "1",
+    "capabilities": ["image-generation"],
+    "source": {
+      "homepage": "https://github.com/comfyanonymous/ComfyUI",
+      "repository": "https://github.com/your-org/asmo-comfyui-pod"
+    },
+    "runtime": {
+      "kind": "http-service",
+      "baseUrl": "http://127.0.0.1:8188",
+      "healthPath": "/system_stats",
+      "submitPath": "/prompt",
+      "method": "POST"
+    },
+    "install": { "command": "${PACKAGE_DIR}/scripts/install.sh" },
+    "startup": { "command": "${PACKAGE_DIR}/scripts/start.sh" },
+    "shutdown": { "command": "${PACKAGE_DIR}/scripts/stop.sh" },
+    "exclusivityGroup": "gpu-0"
+  },
+  "artifacts": {
+    "readme": "README.md",
+    "installScript": "scripts/install.sh",
+    "startScript": "scripts/start.sh",
+    "stopScript": "scripts/stop.sh",
+    "quadlet": "deploy/comfyui.container"
+  },
+  "directories": [
+    { "path": "${HOME}/ai/services/comfy/models", "purpose": "models", "required": true, "createIfMissing": true },
+    { "path": "${HOME}/ai/services/comfy/output", "purpose": "output", "createIfMissing": true },
+    { "path": "${HOME}/ai/services/comfy/input", "purpose": "input", "createIfMissing": true }
+  ],
+  "environment": [
+    { "name": "COMFY_PORT", "default": "8188" }
+  ],
+  "install": { "strategy": "prebuilt-image" },
+  "service": {
+    "installMode": "quadlet",
+    "serviceName": "asmo-comfyui",
+    "quadlet": {
+      "image": "docker.io/library/asmo-comfyui:latest",
+      "publishPort": ["8188:8188"],
+      "volume": [
+        "${HOME}/ai/services/comfy/models:/models",
+        "${HOME}/ai/services/comfy/output:/output"
+      ],
+      "device": ["nvidia.com/gpu=all"],
+      "containerName": "asmo-comfyui"
+    },
+    "systemd": { "after": ["network-online.target"], "wantedBy": ["default.target"], "restart": "on-failure", "timeoutStartSec": 120 }
+  },
+  "source": {
+    "repository": "https://github.com/your-org/asmo-comfyui-pod"
+  }
+}

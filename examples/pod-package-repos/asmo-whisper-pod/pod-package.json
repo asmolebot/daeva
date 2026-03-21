@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "1",
+  "packageType": "pod-package",
+  "name": "asmo-whisper-pod",
+  "version": "0.1.0",
+  "description": "Portable pod package for local Whisper speech-to-text via asmo-pod-orchestrator.",
+  "pod": {
+    "id": "whisper",
+    "nickname": "Whisper",
+    "description": "Speech-to-text pod using faster-whisper.",
+    "manifestVersion": "1",
+    "capabilities": ["speech-to-text"],
+    "source": {
+      "homepage": "https://github.com/openai/whisper",
+      "repository": "https://github.com/your-org/asmo-whisper-pod"
+    },
+    "runtime": {
+      "kind": "http-service",
+      "baseUrl": "http://127.0.0.1:8001",
+      "healthPath": "/health",
+      "submitPath": "/transcribe",
+      "method": "POST"
+    },
+    "install": { "command": "${PACKAGE_DIR}/scripts/install.sh" },
+    "startup": { "command": "${PACKAGE_DIR}/scripts/start.sh" },
+    "shutdown": { "command": "${PACKAGE_DIR}/scripts/stop.sh" },
+    "exclusivityGroup": "gpu-0"
+  },
+  "artifacts": {
+    "readme": "README.md",
+    "installScript": "scripts/install.sh",
+    "startScript": "scripts/start.sh",
+    "stopScript": "scripts/stop.sh",
+    "quadlet": "deploy/whisper.container"
+  },
+  "directories": [
+    { "path": "${HOME}/ai/services/whisper/models", "purpose": "models", "required": true, "createIfMissing": true },
+    { "path": "${HOME}/ai/services/whisper/input", "purpose": "input", "createIfMissing": true }
+  ],
+  "environment": [
+    { "name": "WHISPER_MODEL", "default": "large-v3-turbo" },
+    { "name": "WHISPER_DEVICE", "default": "cuda" },
+    { "name": "WHISPER_COMPUTE_TYPE", "default": "float16" }
+  ],
+  "install": { "strategy": "prebuilt-image" },
+  "service": {
+    "installMode": "quadlet",
+    "serviceName": "asmo-whisper",
+    "quadlet": {
+      "image": "docker.io/library/asmo-whisper:latest",
+      "publishPort": ["8001:8001"],
+      "volume": ["${HOME}/ai/services/whisper/models:/models"],
+      "environment": ["WHISPER_MODEL=large-v3-turbo", "WHISPER_DEVICE=cuda"],
+      "device": ["nvidia.com/gpu=all"],
+      "containerName": "asmo-whisper"
+    },
+    "systemd": { "after": ["network-online.target"], "wantedBy": ["default.target"], "restart": "on-failure" }
+  },
+  "source": {
+    "repository": "https://github.com/your-org/asmo-whisper-pod"
+  }
+}
