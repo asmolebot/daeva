@@ -41,7 +41,27 @@ export const podManifestSchema = z.object({
     resultPath: z.string().optional(),
     method: httpMethodSchema.optional()
   }),
+  /**
+   * install: Run once during package install. Intended for one-time setup
+   * (pulling images, building, creating config files). Does NOT start the pod.
+   * Template variables (${HOME}, ${PACKAGE_DIR}, etc.) are expanded at runtime.
+   */
+  install: lifecycleCommandSchema.optional(),
+  /**
+   * build: Build a container image from source (e.g. `podman build`). Distinct
+   * from install so orchestrators can decide to re-build without reinstalling.
+   * Template variables are expanded at runtime.
+   */
+  build: lifecycleCommandSchema.optional(),
+  /**
+   * startup: Bring the pod up and make it ready to accept jobs. Runs after install.
+   * Template variables are expanded at runtime.
+   */
   startup: lifecycleCommandSchema.optional(),
+  /**
+   * shutdown: Stop the pod gracefully. Does not uninstall or remove images.
+   * Template variables are expanded at runtime.
+   */
   shutdown: lifecycleCommandSchema.optional(),
   exclusivityGroup: z.string().optional(),
   metadata: metadataRecordSchema.optional()
@@ -183,8 +203,58 @@ export const podPackageManifestSchema = z.object({
     notes: z.string().min(1).optional()
   }).optional(),
   service: z.object({
+    /**
+     * How the pod service should be installed on the host.
+     *   manual        - user manages start/stop themselves
+     *   user-systemd  - user-scope systemd unit (systemctl --user)
+     *   systemd       - system-scope systemd unit (requires root or sudo)
+     *   quadlet       - Podman quadlet .container file (preferred for Podman)
+     */
     installMode: z.enum(['manual', 'user-systemd', 'systemd', 'quadlet']).optional(),
-    serviceName: z.string().min(1).optional()
+    /** Systemd/quadlet service unit name (without .service suffix). */
+    serviceName: z.string().min(1).optional(),
+    /**
+     * Quadlet-specific metadata.  When installMode is "quadlet" these fields
+     * can be used to generate or validate a .container quadlet unit file.
+     * All path/volume values support template variables (${HOME}, ${PACKAGE_DIR}, …).
+     */
+    quadlet: z.object({
+      /** Container image reference (e.g. "docker.io/library/asmo-whisper:latest"). */
+      image: z.string().min(1).optional(),
+      /** Port publish specs, each in the form "hostPort:containerPort[/proto]". */
+      publishPort: z.array(z.string().min(1)).optional(),
+      /**
+       * Volume mount specs, each in the form "hostPath:containerPath[:options]".
+       * Template variables are expanded before the quadlet file is written.
+       */
+      volume: z.array(z.string().min(1)).optional(),
+      /** Environment variables to inject, each in the form "KEY=VALUE". */
+      environment: z.array(z.string().min(1)).optional(),
+      /** Device access specs, each in the form "hostDevice[:containerDevice]". */
+      device: z.array(z.string().min(1)).optional(),
+      /** Network specs (e.g. ["host"] or ["bridge"]). */
+      network: z.array(z.string().min(1)).optional(),
+      /** Container labels as key/value pairs. */
+      label: z.record(z.string()).optional(),
+      /** Explicit container name (overrides the quadlet-derived default). */
+      containerName: z.string().min(1).optional(),
+      /** Optional entrypoint/command override passed to the container. */
+      exec: z.string().min(1).optional()
+    }).optional(),
+    /**
+     * Systemd [Service] and [Install] section metadata.
+     * Used when installMode is "user-systemd" or "systemd".
+     */
+    systemd: z.object({
+      /** Units to start before this service (After= directive). */
+      after: z.array(z.string().min(1)).optional(),
+      /** Targets that should pull in this unit (WantedBy= directive). */
+      wantedBy: z.array(z.string().min(1)).optional(),
+      /** Restart policy (maps to Restart= directive). */
+      restart: z.enum(['no', 'on-success', 'on-failure', 'on-abnormal', 'on-abort', 'always']).optional(),
+      /** Maximum seconds to wait for the service to start (TimeoutStartSec=). */
+      timeoutStartSec: z.number().int().positive().optional()
+    }).optional()
   }).optional(),
   examples: z.array(z.object({
     name: z.string().min(1),

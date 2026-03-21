@@ -26,12 +26,42 @@ export interface PodManifest {
     resultPath?: string;
     method?: HttpMethod;
   };
+  /**
+   * install: One-time setup step run during package install (pull images,
+   * create directories, write config). Does NOT start the pod.
+   * Command strings may contain template variables (${HOME}, ${PACKAGE_DIR}, …).
+   */
+  install?: {
+    command?: string;
+    cwd?: string;
+    env?: Record<string, string>;
+    simulatedDelayMs?: number;
+  };
+  /**
+   * build: Build a container image from source. Distinct from install so
+   * orchestrators can re-build without repeating install steps.
+   * Command strings may contain template variables.
+   */
+  build?: {
+    command?: string;
+    cwd?: string;
+    env?: Record<string, string>;
+    simulatedDelayMs?: number;
+  };
+  /**
+   * startup: Bring the pod up and ready to accept jobs. Runs after install.
+   * Command strings may contain template variables.
+   */
   startup?: {
     command?: string;
     cwd?: string;
     env?: Record<string, string>;
     simulatedDelayMs?: number;
   };
+  /**
+   * shutdown: Stop the pod gracefully. Does not uninstall or remove images.
+   * Command strings may contain template variables.
+   */
   shutdown?: {
     command?: string;
     cwd?: string;
@@ -79,8 +109,47 @@ export interface PodPackageManifest {
     notes?: string;
   };
   service?: {
+    /**
+     * How the pod service should be installed on the host.
+     *   manual        - user manages start/stop themselves
+     *   user-systemd  - user-scope systemd unit (systemctl --user)
+     *   systemd       - system-scope systemd unit (requires root or sudo)
+     *   quadlet       - Podman quadlet .container file (preferred for Podman)
+     */
     installMode?: 'manual' | 'user-systemd' | 'systemd' | 'quadlet';
+    /** Systemd/quadlet service unit name (without .service suffix). */
     serviceName?: string;
+    /** Quadlet-specific metadata for generating/validating .container unit files. */
+    quadlet?: {
+      /** Container image reference. */
+      image?: string;
+      /** Port publish specs ("hostPort:containerPort[/proto]"). */
+      publishPort?: string[];
+      /**
+       * Volume mount specs ("hostPath:containerPath[:options]").
+       * Template variables are expanded before the quadlet file is written.
+       */
+      volume?: string[];
+      /** Environment variables to inject ("KEY=VALUE"). */
+      environment?: string[];
+      /** Device access specs. */
+      device?: string[];
+      /** Network specs. */
+      network?: string[];
+      /** Container labels. */
+      label?: Record<string, string>;
+      /** Explicit container name override. */
+      containerName?: string;
+      /** Optional exec/command override. */
+      exec?: string;
+    };
+    /** Systemd [Service]/[Install] metadata for user-systemd or systemd installMode. */
+    systemd?: {
+      after?: string[];
+      wantedBy?: string[];
+      restart?: 'no' | 'on-success' | 'on-failure' | 'on-abnormal' | 'on-abort' | 'always';
+      timeoutStartSec?: number;
+    };
   };
   examples?: Array<{
     name: string;

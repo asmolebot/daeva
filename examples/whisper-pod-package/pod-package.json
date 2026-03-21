@@ -22,11 +22,14 @@
       "submitPath": "/transcribe",
       "method": "POST"
     },
+    "install": {
+      "command": "${PACKAGE_DIR}/scripts/install.sh"
+    },
     "startup": {
-      "command": "./scripts/start.sh"
+      "command": "${PACKAGE_DIR}/scripts/start.sh"
     },
     "shutdown": {
-      "command": "./scripts/stop.sh"
+      "command": "${PACKAGE_DIR}/scripts/stop.sh"
     },
     "exclusivityGroup": "gpu-0",
     "metadata": {
@@ -43,39 +46,63 @@
   },
   "directories": [
     {
-      "path": "data/models",
+      "path": "${HOME}/ai/services/whisper/models",
       "purpose": "models",
       "required": true,
       "createIfMissing": true,
-      "description": "Mounted Whisper models directory."
+      "description": "Whisper model weights. Mounted at /models inside the container."
     },
     {
-      "path": "data/input",
+      "path": "${HOME}/ai/services/whisper/input",
       "purpose": "input",
       "createIfMissing": true,
-      "description": "Optional local scratch space for uploads."
+      "description": "Optional local scratch space for audio uploads."
     }
   ],
   "environment": [
     {
       "name": "WHISPER_MODEL",
       "default": "large-v3-turbo",
-      "description": "Default model loaded by the pod."
+      "description": "Whisper model name to load on startup."
     },
     {
       "name": "WHISPER_DEVICE",
       "default": "cuda",
-      "description": "Execution device.",
+      "description": "Execution device (cuda or cpu).",
+      "required": false
+    },
+    {
+      "name": "WHISPER_COMPUTE_TYPE",
+      "default": "float16",
+      "description": "Quantisation type (float16, int8, etc.).",
       "required": false
     }
   ],
   "install": {
     "strategy": "prebuilt-image",
-    "notes": "Future installers can choose between podman run, compose, or quadlet generation."
+    "notes": "Pull docker.io/library/asmo-whisper:latest with `podman pull` or use the install script. For quadlet-based installs, copy deploy/whisper.container to ~/.config/containers/systemd/."
   },
   "service": {
     "installMode": "quadlet",
-    "serviceName": "asmo-whisper"
+    "serviceName": "asmo-whisper",
+    "quadlet": {
+      "image": "docker.io/library/asmo-whisper:latest",
+      "publishPort": ["8001:8001"],
+      "volume": ["${HOME}/ai/services/whisper/models:/models"],
+      "environment": [
+        "WHISPER_MODEL=large-v3-turbo",
+        "WHISPER_COMPUTE_TYPE=float16",
+        "WHISPER_DEVICE=cuda"
+      ],
+      "device": ["nvidia.com/gpu=all"],
+      "containerName": "asmo-whisper"
+    },
+    "systemd": {
+      "after": ["network-online.target"],
+      "wantedBy": ["default.target"],
+      "restart": "on-failure",
+      "timeoutStartSec": 120
+    }
   },
   "examples": [
     {

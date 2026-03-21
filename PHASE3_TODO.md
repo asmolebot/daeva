@@ -88,10 +88,29 @@ The package should describe:
   - Installed package metadata continues to live in `.data/installed-packages.json` with the same schema/store shape for local, Git-backed, and uploaded-archive installs.
 
 ### D. Runtime/install improvements
-- [ ] Split install/start/stop/build semantics more cleanly in manifests
-- [ ] Add real install hooks for Podman-based pods
-- [ ] Improve host path/volume templating
-- [ ] Add support for optional service/quadlet metadata in package spec
+- [x] Split install/start/stop/build semantics more cleanly in manifests
+  - Added `install` and `build` as distinct optional lifecycle phases alongside existing `startup`/`shutdown` on `PodManifest`.
+  - Each phase is documented with its own JSDoc: install = one-time setup (pull/config); build = image build; startup = bring pod up; shutdown = graceful stop.
+  - `PodController.runLifecycleCommand()` now handles all four phases.
+- [x] Add real install hooks for Podman-based pods
+  - New `src/install-hooks.ts` with `runInstallHooks()` and `describeInstallHooks()`.
+  - Runs `podman pull` for `prebuilt-image` strategy; `podman build` for `dockerfile` strategy.
+  - Creates `createIfMissing` host directories with proper template expansion.
+  - Executes `pod.install.command` if defined (hard error on failure, unlike Podman steps which are best-effort).
+  - `create-flow.ts` captures hook descriptions (`installHookSteps`) in `MaterializedPodCreatePlan` and accepts `runInstallHooks` / `installHookOptions` flags.
+  - Updated example whisper scripts from placeholder `echo` stubs to real Podman commands with env-var fallbacks.
+- [x] Improve host path/volume templating
+  - New `src/path-template.ts` with `applyTemplate()`, `applyTemplateToCommand()`, `applyTemplateToEnv()`, `applyTemplateToPath()`, and `buildContext()`.
+  - Supports `${VAR}` and `{{VAR}}` syntax; unknown variables left unchanged.
+  - Built-in variables: `HOME`, `USER`, `PACKAGE_DIR`, `DATA_DIR` (auto-derived), `POD_ID`.
+  - `PodController` applies template substitution to all lifecycle commands before execution.
+  - `install-hooks.ts` applies templates to all directory paths and commands.
+  - Example `pod-package.json` updated to use `${HOME}` and `${PACKAGE_DIR}` in directory paths and commands.
+- [x] Add support for optional service/quadlet metadata in package spec
+  - `service` block in `PodPackageManifest` (and schema) expanded with a `quadlet` sub-object (image, publishPort, volume, environment, device, network, label, containerName, exec) and a `systemd` sub-object (after, wantedBy, restart, timeoutStartSec).
+  - All new fields optional; schema is backward compatible with existing package manifests.
+  - Example `pod-package.json` now includes a fully populated `service.quadlet` + `service.systemd` section.
+  - Updated `deploy/whisper.container` quadlet file with complete [Container]/[Service]/[Install] sections.
 - [x] Add richer runtime state detection from local Podman
   - `/status` and `/status/runtime` now attempt live Podman-backed inspection (`podman ps -a --format json`) for declared manifest container names, exposing observed name/image/state/status/ports with graceful fallback when Podman is absent or a container is missing.
 

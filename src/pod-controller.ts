@@ -2,6 +2,7 @@ import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { SchedulingError } from './errors.js';
+import { applyTemplateToCommand, applyTemplateToEnv, buildContext, type TemplateContext } from './path-template.js';
 import type { PodLifecycleStatus, PodManifest } from './types.js';
 import { sleep } from './utils.js';
 
@@ -14,14 +15,25 @@ interface PodRuntimeState {
   lastStoppedAt?: string;
 }
 
+export interface PodControllerOptions {
+  /**
+   * Template context applied to all lifecycle command strings before execution.
+   * Built-in defaults (HOME, USER) are always included; these values override them.
+   * Useful for passing PACKAGE_DIR or per-host overrides.
+   */
+  templateContext?: TemplateContext;
+}
+
 export interface ManagedPodState extends PodRuntimeState {
   manifest: PodManifest;
 }
 
 export class PodController {
   private readonly states = new Map<string, PodRuntimeState>();
+  private readonly templateCtx: TemplateContext;
 
-  constructor(manifests: PodManifest[]) {
+  constructor(manifests: PodManifest[], options: PodControllerOptions = {}) {
+    this.templateCtx = buildContext(options.templateContext ?? {});
     manifests.forEach((manifest) => {
       this.states.set(manifest.id, { status: 'stopped' });
     });
@@ -128,12 +140,14 @@ export class PodController {
     return state;
   }
 
-  private async runLifecycleCommand(step?: PodManifest['startup'] | PodManifest['shutdown']): Promise<void> {
+  private async runLifecycleCommand(step?: PodManifest['startup'] | PodManifest['shutdown'] | PodManifest['install'] | PodManifest['build']): Promise<void> {
     if (!step) return;
     if (step.command) {
-      await exec(step.command, {
+      const resolvedCommand = applyTemplateToCommand(step.command, this.templateCtx) ?? step.command;
+      const resolvedEnv = applyTemplateToEnv(step.env, this.templateCtx);
+      await exec(resolvedCommand, {
         cwd: step.cwd,
-        env: step.env ? { ...process.env, ...step.env } : process.env
+        env: resolvedEnv ? { ...process.env, ...resolvedEnv } : process.env
       });
     }
     if (step.simulatedDelayMs) {

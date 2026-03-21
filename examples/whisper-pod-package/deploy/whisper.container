@@ -1,3 +1,28 @@
+# Podman Quadlet unit file for asmo-whisper.
+# Drop this into ~/.config/containers/systemd/ (user) or /etc/containers/systemd/ (system).
+# Run `systemctl --user daemon-reload` then `systemctl --user start asmo-whisper`.
+#
+# Template variables like %h (home dir) are native Quadlet/systemd specifiers.
+# Package-level variables (${HOME}, ${PACKAGE_DIR}) are expanded by the
+# orchestrator when generating this file from service.quadlet metadata.
+
+[Unit]
+Description=Asmo Whisper speech-to-text pod
+After=network-online.target
+
 [Container]
 Image=docker.io/library/asmo-whisper:latest
+ContainerName=asmo-whisper
 PublishPort=8001:8001
+Volume=%h/ai/services/whisper/models:/models
+Environment=WHISPER_MODEL=large-v3-turbo
+Environment=WHISPER_COMPUTE_TYPE=float16
+Environment=WHISPER_DEVICE=cuda
+AddDevice=nvidia.com/gpu=all
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target

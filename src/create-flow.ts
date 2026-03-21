@@ -3,6 +3,8 @@ import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 
+import { describeInstallHooks, runInstallHooks, type InstallHookOptions } from './install-hooks.js';
+
 import { NotFoundError } from './errors.js';
 import { parsePodPackageManifest } from './manifest-loader.js';
 import type { InstalledPackageStore } from './installed-package-store.js';
@@ -28,6 +30,11 @@ export interface MaterializedPodCreatePlan {
   status: 'installed';
   summary: string;
   installedPackage: InstalledPackageMetadata;
+  /**
+   * Human-readable description of install hook steps that ran or would run.
+   * Present when install hooks were executed or when hook descriptions are available.
+   */
+  installHookSteps?: string[];
 }
 
 export interface UnresolvedPodCreatePlan {
@@ -50,6 +57,16 @@ export interface CreateFromAliasOptions {
   installedPackageStore: InstalledPackageStore;
   projectRoot?: string;
   managedPackagesRoot?: string;
+  /**
+   * When true (default: false), automatically run install hooks (directory
+   * creation, podman pull/build, install lifecycle command) after materializing
+   * a package.  Hooks run with dryRun=false.
+   */
+  runInstallHooks?: boolean;
+  /**
+   * Options forwarded to the install hook runner when runInstallHooks is true.
+   */
+  installHookOptions?: Omit<InstallHookOptions, 'templateContext'>;
 }
 
 const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
@@ -157,7 +174,8 @@ const persistInstalledPackage = (
   packageManifestPath: string,
   materializedPath: string,
   options: CreateFromAliasOptions,
-  summaryPrefix: string
+  summaryPrefix: string,
+  installHookSteps?: string[]
 ): MaterializedPodCreatePlan => {
   const installedPackage: InstalledPackageMetadata = {
     alias: registryEntry.alias,
@@ -181,7 +199,8 @@ const persistInstalledPackage = (
   return {
     status: 'installed',
     summary: `${summaryPrefix} ${manifest.name}@${manifest.version} for alias ${registryEntry.alias}.`,
-    installedPackage
+    installedPackage,
+    installHookSteps
   };
 };
 
@@ -199,6 +218,8 @@ const materializeLocalFilePackage = (
   mkdirSync(managedPackagesRoot, { recursive: true });
   cpSync(sourcePath, managedAliasPath, { recursive: true, force: true });
 
+  const hookSteps = describeInstallHooks(manifest, managedAliasPath);
+
   return persistInstalledPackage(
     registryEntry,
     manifest,
@@ -207,7 +228,8 @@ const materializeLocalFilePackage = (
     packageManifestPath,
     managedAliasPath,
     options,
-    'Installed local package'
+    'Installed local package',
+    hookSteps.length > 0 ? hookSteps : undefined
   );
 };
 
@@ -261,6 +283,8 @@ const cloneAndMaterializeGitPackage = (
       ? safeJoinWithin(managedAliasPath, source.packageManifestPath, 'source.packageManifestPath')
       : path.join(managedAliasPath, 'pod-package.json');
 
+    const hookSteps = describeInstallHooks(manifest, managedAliasPath);
+
     return persistInstalledPackage(
       registryEntry,
       manifest,
@@ -269,7 +293,8 @@ const cloneAndMaterializeGitPackage = (
       materializedManifestPath,
       managedAliasPath,
       options,
-      source.kind === 'github-repo' ? 'Installed GitHub package' : 'Installed Git package'
+      source.kind === 'github-repo' ? 'Installed GitHub package' : 'Installed Git package',
+      hookSteps.length > 0 ? hookSteps : undefined
     );
   } finally {
     rmSync(checkoutRoot, { recursive: true, force: true });
@@ -430,6 +455,8 @@ const materializeUploadedArchivePackage = (
       ? safeJoinWithin(managedAliasPath, source.packageManifestPath, 'source.packageManifestPath')
       : path.join(managedAliasPath, 'pod-package.json');
 
+    const hookSteps = describeInstallHooks(manifest, managedAliasPath);
+
     return persistInstalledPackage(
       registryEntry,
       manifest,
@@ -438,7 +465,8 @@ const materializeUploadedArchivePackage = (
       materializedManifestPath,
       managedAliasPath,
       options,
-      'Installed uploaded archive package'
+      'Installed uploaded archive package',
+      hookSteps.length > 0 ? hookSteps : undefined
     );
   } finally {
     rmSync(unpackRoot, { recursive: true, force: true });
