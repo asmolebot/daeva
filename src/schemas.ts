@@ -6,7 +6,19 @@ const lifecycleCommandSchema = z.object({
   command: z.string().optional(),
   cwd: z.string().optional(),
   env: z.record(z.string()).optional(),
-  simulatedDelayMs: z.number().int().nonnegative().optional()
+  simulatedDelayMs: z.number().int().nonnegative().optional(),
+  timeoutMs: z.number().int().positive().optional()
+});
+
+const retryConfigSchema = z.object({
+  maxRetries: z.number().int().nonnegative().optional(),
+  baseDelayMs: z.number().int().positive().optional(),
+  maxDelayMs: z.number().int().positive().optional()
+});
+
+const healthCheckConfigSchema = z.object({
+  timeoutMs: z.number().int().positive().optional(),
+  intervalMs: z.number().int().positive().optional()
 });
 
 const safeRelativePathSchema = z.string().min(1).refine((value) => {
@@ -28,7 +40,12 @@ const httpServiceRuntimeSchema = z.object({
   healthPath: z.string().optional(),
   submitPath: z.string().min(1),
   resultPath: z.string().optional(),
-  method: httpMethodSchema.optional()
+  method: httpMethodSchema.optional(),
+  requestTimeoutMs: z.number().int().positive().optional(),
+  retry: retryConfigSchema.optional(),
+  pollingIntervalMs: z.number().int().positive().optional(),
+  pollingTimeoutMs: z.number().int().positive().optional(),
+  healthCheck: healthCheckConfigSchema.optional()
 });
 
 const rpodExecOptionsSchema = z.object({
@@ -44,7 +61,8 @@ const rpodRuntimeSchema = z.object({
   host: z.string().min(1),
   /** GPU/device allocation spec (e.g. "gpu:0", "cuda:0") */
   device: z.string().min(1).optional(),
-  execOptions: rpodExecOptionsSchema.optional()
+  execOptions: rpodExecOptionsSchema.optional(),
+  healthCheck: healthCheckConfigSchema.optional()
 });
 
 const podRuntimeSchema = z.discriminatedUnion('kind', [

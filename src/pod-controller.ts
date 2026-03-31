@@ -12,16 +12,29 @@ import {
   rpodStop,
   setRpodPodId
 } from './rpod-adapter.js';
-import type { PodLifecycleStatus, PodManifest, RpodRuntime } from './types.js';
+import type { HealthCheckConfig, PodLifecycleStatus, PodManifest, RpodRuntime } from './types.js';
 import { sleep } from './utils.js';
 
 const exec = promisify(execCb);
+
+const DEFAULT_LIFECYCLE_TIMEOUT_MS = 120_000;
+const DEFAULT_RPOD_HEALTH_TIMEOUT_MS = 30_000;
+const DEFAULT_RPOD_HEALTH_INTERVAL_MS = 1_000;
+const DEFAULT_HTTP_HEALTH_TIMEOUT_MS = 15_000;
+const DEFAULT_HTTP_HEALTH_INTERVAL_MS = 500;
+
+export interface LifecycleCommandResult {
+  stdout: string;
+  stderr: string;
+}
 
 interface PodRuntimeState {
   status: PodLifecycleStatus;
   currentJobId?: string;
   lastStartedAt?: string;
   lastStoppedAt?: string;
+  /** Last lifecycle command output, for debugging. */
+  lastLifecycleOutput?: LifecycleCommandResult;
 }
 
 export interface PodControllerOptions {
@@ -63,6 +76,11 @@ export class PodController {
     return state.status;
   }
 
+  /** Get the last lifecycle command output for a pod, useful for debugging. */
+  getLastLifecycleOutput(podId: string): LifecycleCommandResult | undefined {
+    return this.states.get(podId)?.lastLifecycleOutput;
+  }
+
   snapshot(manifests: PodManifest[]): ManagedPodState[] {
     return manifests.map((manifest) => ({
       manifest,
@@ -89,7 +107,7 @@ export class PodController {
       const podId = await rpodRun(rpodRuntime);
       setRpodPodId(manifest.id, podId);
     } else {
-      await this.runLifecycleCommand(manifest.startup);
+      await this.runLifecycleCommand(manifest.id, manifest.startup);
     }
 
     await this.waitForHealth(manifest);
@@ -109,15 +127,21 @@ export class PodController {
 
     state.status = 'stopping';
 
-    if (manifest.runtime.kind === 'rpod') {
-      const rpodRuntime = manifest.runtime as RpodRuntime;
-      const podId = getRpodPodId(manifest.id);
-      if (podId) {
-        await rpodStop(rpodRuntime, podId);
-        clearRpodPodId(manifest.id);
+    try {
+      if (manifest.runtime.kind === 'rpod') {
+        const rpodRuntime = manifest.runtime as RpodRuntime;
+        const podId = getRpodPodId(manifest.id);
+        if (podId) {
+          await rpodStop(rpodRuntime, podId);
+          clearRpodPodId(manifest.id);
+        }
+      } else {
+        await this.runLifecycleCommand(manifest.id, manifest.shutdown);
       }
-    } else {
-      await this.runLifecycleCommand(manifest.shutdown);
+    } catch (error) {
+      // Graceful degradation: log the error but still mark as stopped.
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[pod-controller] shutdown command failed for pod ${manifest.id}: ${message}`);
     }
 
     state.status = 'stopped';
@@ -168,15 +192,27 @@ export class PodController {
     return state;
   }
 
-  private async runLifecycleCommand(step?: PodManifest['startup'] | PodManifest['shutdown'] | PodManifest['install'] | PodManifest['build']): Promise<void> {
+  private async runLifecycleCommand(
+    podId: string,
+    step?: PodManifest['startup'] | PodManifest['shutdown'] | PodManifest['install'] | PodManifest['build']
+  ): Promise<void> {
     if (!step) return;
     if (step.command) {
       const resolvedCommand = applyTemplateToCommand(step.command, this.templateCtx) ?? step.command;
       const resolvedEnv = applyTemplateToEnv(step.env, this.templateCtx);
-      await exec(resolvedCommand, {
+      const timeoutMs = step.timeoutMs ?? DEFAULT_LIFECYCLE_TIMEOUT_MS;
+
+      const { stdout, stderr } = await exec(resolvedCommand, {
         cwd: step.cwd,
-        env: resolvedEnv ? { ...process.env, ...resolvedEnv } : process.env
+        env: resolvedEnv ? { ...process.env, ...resolvedEnv } : process.env,
+        timeout: timeoutMs
       });
+
+      // Store last output for debugging.
+      const state = this.states.get(podId);
+      if (state) {
+        state.lastLifecycleOutput = { stdout: stdout ?? '', stderr: stderr ?? '' };
+      }
     }
     if (step.simulatedDelayMs) {
       await sleep(step.simulatedDelayMs);
@@ -185,13 +221,13 @@ export class PodController {
 
   private async waitForHealth(manifest: PodManifest): Promise<void> {
     if (manifest.runtime.kind === 'rpod') {
-      // For rpod, poll rpod ps until the pod shows as running
       const rpodRuntime = manifest.runtime as RpodRuntime;
       const podId = getRpodPodId(manifest.id);
       if (!podId) return; // nothing to wait for without a pod-id
 
-      const timeoutMs = 30000;
-      const intervalMs = 1000;
+      const hc: HealthCheckConfig = rpodRuntime.healthCheck ?? {};
+      const timeoutMs = hc.timeoutMs ?? DEFAULT_RPOD_HEALTH_TIMEOUT_MS;
+      const intervalMs = hc.intervalMs ?? DEFAULT_RPOD_HEALTH_INTERVAL_MS;
       const deadline = Date.now() + timeoutMs;
 
       while (Date.now() < deadline) {
@@ -208,8 +244,9 @@ export class PodController {
     const healthPath = manifest.runtime.healthPath;
     if (!healthPath) return;
 
-    const timeoutMs = 15000;
-    const intervalMs = 500;
+    const hc: HealthCheckConfig = manifest.runtime.healthCheck ?? {};
+    const timeoutMs = hc.timeoutMs ?? DEFAULT_HTTP_HEALTH_TIMEOUT_MS;
+    const intervalMs = hc.intervalMs ?? DEFAULT_HTTP_HEALTH_INTERVAL_MS;
     const deadline = Date.now() + timeoutMs;
     const url = `${manifest.runtime.baseUrl}${healthPath}`;
 

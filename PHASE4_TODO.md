@@ -1,0 +1,80 @@
+# Phase 4 — Production Hardening & Real Execution
+
+Goal: Make asmo-pod-orchestrator actually execute real workloads end-to-end, persist state, and be publishable to npm/ClaWHub.
+
+## Task List
+
+### A. Real HTTP Adapter (priority: highest)
+- [x] Replace mocked `HttpPodAdapter` with real HTTP calls to pod endpoints
+- [x] Support form-data file uploads (for whisper/vision jobs with file attachments)
+- [x] Support JSON body submissions (for comfyui/image-gen jobs)
+- [x] Add configurable retry logic (exponential backoff, max retries)
+  - Per-manifest `retry: { maxRetries, baseDelayMs, maxDelayMs }` on HttpServiceRuntime
+  - Global defaults via `HttpPodAdapterOptions`; only retries retriable errors (5xx, network)
+- [x] Add request timeout handling
+  - Per-manifest `requestTimeoutMs` on HttpServiceRuntime; uses independent AbortController layered on context signal
+- [x] Add async polling support for long-running jobs (poll resultPath until done)
+  - If `runtime.resultPath` is set, polls after submit; configurable `pollingIntervalMs`/`pollingTimeoutMs`
+  - Handles 404/202 as "not ready", checks `status` field for terminal states
+- [x] Handle pod-specific response parsing per capability (transcript extraction, image URL extraction, etc.)
+  - `normalizeCompletedResult` handles ComfyUI (images/generatedImages), Whisper (transcript/text/segments), vision (detections/objects/labels)
+- [x] Integration with rpod adapter (real rpod exec calls, not just stubs)
+
+### B. Execute Lifecycle Commands (priority: highest — unblocks real pod usage)
+- [x] Actually execute `startup.command` when starting a pod (shell exec with timeout)
+- [x] Actually execute `shutdown.command` when stopping a pod
+- [x] Actually execute `install.command` during create flow
+- [x] Actually execute `build.command` if defined
+- [x] Add lifecycle command timeout configuration
+  - Per-step `timeoutMs` field on each lifecycle step (install/build/startup/shutdown); default 120s
+  - Passed to Node `exec()` timeout option which sends SIGTERM on expiry
+- [x] Add lifecycle command output capture/logging
+  - `PodController.getLastLifecycleOutput(podId)` returns `{ stdout, stderr }` from last command
+  - Stored per-pod in runtime state for debugging
+- [x] Health check polling after startup (hit healthPath until 200 or timeout)
+  - Per-manifest `healthCheck: { timeoutMs, intervalMs }` on both HttpServiceRuntime and RpodRuntime
+  - Defaults: http 15s/500ms, rpod 30s/1s
+- [x] Graceful degradation if shutdown command fails
+  - Shutdown errors are caught, logged to stderr, pod still marked as stopped
+
+### C. Persistent Job Store (priority: high)
+- [ ] Add SQLite-backed job store (better-sqlite3 or similar)
+- [ ] Migrate JobManager from in-memory Map to SQLite
+- [ ] Persist job state transitions (queued → running → completed/failed)
+- [ ] Persist job results and error payloads
+- [ ] Add job expiration/cleanup (configurable TTL)
+- [ ] Ensure backward-compatible API responses
+
+### D. Auth & Rate Limiting (priority: medium)
+- [ ] Add optional API key authentication (Bearer token)
+- [ ] Add per-key or global rate limiting
+- [ ] Add configurable auth bypass for localhost
+- [ ] Store API keys in config/env (not hardcoded)
+
+### E. Multipart Archive Uploads (priority: medium)
+- [ ] Add multipart/form-data upload support on `POST /pods/create`
+- [ ] Stream archive to disk instead of requiring full base64 in JSON
+- [ ] Keep existing JSON/base64 path as fallback
+- [ ] Add upload size limits as Fastify plugin config
+
+### F. Smarter Scheduling (priority: lower)
+- [ ] Add job priority levels (low/normal/high/critical)
+- [ ] Add per-pod concurrency limits
+- [ ] Add capability-aware cost routing (prefer cheaper/faster pod when multiple match)
+- [ ] Add job queue position reporting
+- [ ] Add job cancellation support
+
+## Working Order
+
+1. **A + B together** (real adapter + lifecycle execution) — these unblock actual pod usage
+2. **C** (persistent jobs) — needed before publish so restarts don't lose state
+3. **D** (auth) — needed before exposing to network
+4. **E** (multipart uploads) — nice to have for remote clients
+5. **F** (scheduling) — polish for multi-user/multi-job scenarios
+
+## Notes
+
+- Target: publishable to npm as `asmo-pod-orchestrator` + ClaWHub as a skill
+- First real test target: Hecate (they/them) running ComfyUI image generation via the orchestrator on razerblade
+- All tests must pass before each chunk is considered done
+- Check off items as completed; add implementation notes under tasks

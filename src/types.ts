@@ -15,6 +15,24 @@ export interface RpodExecOptions {
   env?: Record<string, string>;
 }
 
+/** Retry configuration for HTTP requests. */
+export interface RetryConfig {
+  /** Maximum number of retry attempts (default: 3). */
+  maxRetries?: number;
+  /** Base delay in ms for exponential backoff (default: 500). */
+  baseDelayMs?: number;
+  /** Maximum delay in ms between retries (default: 10000). */
+  maxDelayMs?: number;
+}
+
+/** Health check polling configuration. */
+export interface HealthCheckConfig {
+  /** Maximum time to wait for health check to pass (ms). */
+  timeoutMs?: number;
+  /** Polling interval between health checks (ms). */
+  intervalMs?: number;
+}
+
 /** HTTP-service runtime — a local or remote HTTP endpoint. */
 export interface HttpServiceRuntime {
   kind: 'http-service';
@@ -23,6 +41,16 @@ export interface HttpServiceRuntime {
   submitPath: string;
   resultPath?: string;
   method?: HttpMethod;
+  /** Per-request timeout in ms (default: 30000). Uses AbortController. */
+  requestTimeoutMs?: number;
+  /** Retry config for failed requests. Only retries on retriable errors. */
+  retry?: RetryConfig;
+  /** Polling interval in ms when using resultPath for async jobs (default: 2000). */
+  pollingIntervalMs?: number;
+  /** Max time to poll resultPath before timing out (default: 300000 = 5min). */
+  pollingTimeoutMs?: number;
+  /** Health check polling config overrides. */
+  healthCheck?: HealthCheckConfig;
 }
 
 /**
@@ -43,6 +71,8 @@ export interface RpodRuntime {
   device?: string;
   /** Optional per-exec options. */
   execOptions?: RpodExecOptions;
+  /** Health check polling config overrides. */
+  healthCheck?: HealthCheckConfig;
 }
 
 export type PodRuntime = HttpServiceRuntime | RpodRuntime;
@@ -69,6 +99,8 @@ export interface PodManifest {
     cwd?: string;
     env?: Record<string, string>;
     simulatedDelayMs?: number;
+    /** Timeout in ms for this lifecycle command (default: 120000). */
+    timeoutMs?: number;
   };
   /**
    * build: Build a container image from source. Distinct from install so
@@ -80,6 +112,8 @@ export interface PodManifest {
     cwd?: string;
     env?: Record<string, string>;
     simulatedDelayMs?: number;
+    /** Timeout in ms for this lifecycle command (default: 120000). */
+    timeoutMs?: number;
   };
   /**
    * startup: Bring the pod up and ready to accept jobs. Runs after install.
@@ -90,6 +124,8 @@ export interface PodManifest {
     cwd?: string;
     env?: Record<string, string>;
     simulatedDelayMs?: number;
+    /** Timeout in ms for this lifecycle command (default: 120000). */
+    timeoutMs?: number;
   };
   /**
    * shutdown: Stop the pod gracefully. Does not uninstall or remove images.
@@ -100,6 +136,8 @@ export interface PodManifest {
     cwd?: string;
     env?: Record<string, string>;
     simulatedDelayMs?: number;
+    /** Timeout in ms for this lifecycle command (default: 120000). */
+    timeoutMs?: number;
   };
   exclusivityGroup?: string;
   metadata?: Record<string, unknown>;
