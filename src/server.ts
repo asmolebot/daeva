@@ -1,4 +1,10 @@
+import { createWriteStream, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
+
 import Fastify from 'fastify';
+import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
 
 import { authPlugin, type AuthPluginOptions } from './auth.js';
@@ -18,7 +24,9 @@ import {
   buildStatusSnapshot
 } from './status.js';
 import type { RuntimeInspector } from './runtime-inspector.js';
-import type { PodManifest } from './types.js';
+import type { PodManifest, UploadedArchiveRegistrySource } from './types.js';
+
+const DEFAULT_UPLOAD_MAX_BYTES = 50 * 1024 * 1024; // 50 MiB
 
 export interface AppDependencies {
   registry?: PodRegistry;
@@ -31,6 +39,8 @@ export interface AppDependencies {
   runtimeInspector?: RuntimeInspector;
   auth?: AuthPluginOptions;
   rateLimit?: { max?: number; windowMs?: number };
+  /** Maximum upload size in bytes for multipart archive uploads (default: 50 MiB). */
+  uploadMaxBytes?: number;
 }
 
 export const buildApp = async (dependencies: AppDependencies = {}) => {
@@ -40,7 +50,13 @@ export const buildApp = async (dependencies: AppDependencies = {}) => {
   const jobManager = dependencies.jobManager ?? new JobManager(registry, podController, router);
   const installedPackageStore = dependencies.installedPackageStore ?? new InstalledPackageStore();
 
+  const uploadMaxBytes = dependencies.uploadMaxBytes ?? DEFAULT_UPLOAD_MAX_BYTES;
   const app = Fastify({ logger: false });
+
+  // Multipart support (archive uploads on POST /pods/create)
+  await app.register(multipart, {
+    limits: { fileSize: uploadMaxBytes }
+  });
 
   // Auth plugin (enabled when apiKeys provided)
   await app.register(authPlugin, dependencies.auth ?? {});
@@ -66,7 +82,115 @@ export const buildApp = async (dependencies: AppDependencies = {}) => {
   });
 
   app.post('/pods/create', async (request, reply) => {
-    const payload = podCreateRequestSchema.parse(request.body);
+    let payload: ReturnType<typeof podCreateRequestSchema.parse>;
+
+    const contentType = request.headers['content-type'] ?? '';
+    if (contentType.includes('multipart/form-data')) {
+      // Multipart upload: stream archive to disk, read metadata fields
+      const fields: Record<string, string> = {};
+      let archiveTempDir: string | undefined;
+      let archiveTempPath: string | undefined;
+      let archiveFilename: string | undefined;
+
+      try {
+        const parts = request.parts();
+        for await (const part of parts) {
+          if (part.type === 'file' && part.fieldname === 'archive') {
+            archiveFilename = part.filename;
+            archiveTempDir = mkdtempSync(path.join(os.tmpdir(), 'asmo-multipart-'));
+            archiveTempPath = path.join(archiveTempDir, path.basename(part.filename));
+            await pipeline(part.file, createWriteStream(archiveTempPath));
+
+            if (part.file.truncated) {
+              rmSync(archiveTempDir, { recursive: true, force: true });
+              reply.code(413);
+              return {
+                error: {
+                  code: 'UPLOAD_TOO_LARGE',
+                  type: 'validation',
+                  message: `Upload exceeds ${Math.floor(uploadMaxBytes / (1024 * 1024))} MiB limit`,
+                  retriable: false
+                }
+              };
+            }
+          } else if (part.type === 'field' && typeof part.value === 'string') {
+            fields[part.fieldname] = part.value;
+          }
+        }
+
+        if (!archiveTempPath || !archiveFilename) {
+          if (archiveTempDir) rmSync(archiveTempDir, { recursive: true, force: true });
+          reply.code(400);
+          return {
+            error: {
+              code: 'REQUEST_VALIDATION_ERROR',
+              type: 'validation',
+              message: 'Multipart upload requires an "archive" file field',
+              retriable: false
+            }
+          };
+        }
+
+        const source: UploadedArchiveRegistrySource = {
+          kind: 'uploaded-archive',
+          filename: archiveFilename,
+          archiveBase64: 'multipart-upload',
+          archivePath: archiveTempPath,
+          subpath: fields.subpath,
+          packageManifestPath: fields.packageManifestPath
+        };
+
+        payload = podCreateRequestSchema.parse({
+          alias: fields.alias,
+          source
+        });
+      } catch (error) {
+        if (archiveTempDir) rmSync(archiveTempDir, { recursive: true, force: true });
+        throw error;
+      }
+
+      // Run create flow, then clean up temp archive
+      try {
+        const plan = createFromAlias(payload, {
+          registry,
+          podController,
+          installedPackageStore,
+          projectRoot: dependencies.projectRoot,
+          managedPackagesRoot: dependencies.managedPackagesRoot
+        });
+
+        reply.code(plan.materialization.status === 'installed' ? 201 : 202);
+        return {
+          create: plan,
+          links: {
+            aliases: '/pods/aliases',
+            installed: '/pods/installed'
+          }
+        };
+      } catch (error) {
+        if (error instanceof NotFoundError) {
+          reply.code(404);
+          return {
+            error: {
+              code: error.code,
+              type: error.type,
+              message: error.message,
+              retriable: error.retriable ?? false,
+              details: {
+                ...(error.details ?? {}),
+                knownAliases: registry.listAliases().map((entry) => entry.alias)
+              }
+            }
+          };
+        }
+        throw error;
+      } finally {
+        if (archiveTempDir) rmSync(archiveTempDir, { recursive: true, force: true });
+      }
+    }
+
+    // JSON path (existing behavior)
+    payload = podCreateRequestSchema.parse(request.body);
 
     try {
       const plan = createFromAlias(payload, {

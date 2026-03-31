@@ -134,7 +134,9 @@ export const registrySourceSchema = z.discriminatedUnion('kind', [
     archiveBase64: z.string().min(1),
     contentType: z.string().min(1).optional(),
     subpath: safeRelativePathSchema.optional(),
-    packageManifestPath: safeRelativePathSchema.optional()
+    packageManifestPath: safeRelativePathSchema.optional(),
+    /** Internal: path to a pre-written archive file (set by multipart upload handler). */
+    archivePath: z.string().min(1).optional()
   }),
   z.object({
     kind: z.literal('registry-index'),

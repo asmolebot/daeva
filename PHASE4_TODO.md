@@ -68,10 +68,20 @@ Goal: Make asmo-pod-orchestrator actually execute real workloads end-to-end, per
   - Keys passed via `AuthPluginOptions.apiKeys`; CLI reads from `ASMO_API_KEYS` env var (comma-separated)
 
 ### E. Multipart Archive Uploads (priority: medium)
-- [ ] Add multipart/form-data upload support on `POST /pods/create`
-- [ ] Stream archive to disk instead of requiring full base64 in JSON
-- [ ] Keep existing JSON/base64 path as fallback
-- [ ] Add upload size limits as Fastify plugin config
+- [x] Add multipart/form-data upload support on `POST /pods/create`
+  - `@fastify/multipart` registered on the Fastify app; multipart requests stream the `archive` file field to a temp directory
+  - Metadata fields (`alias`, `subpath`, `packageManifestPath`) read from text parts
+  - Constructs an `UploadedArchiveRegistrySource` with `archivePath` pointing to the streamed file on disk
+- [x] Stream archive to disk instead of requiring full base64 in JSON
+  - Uses `pipeline(part.file, createWriteStream(archiveTempPath))` for zero-copy streaming
+  - Temp directory cleaned up in `finally` block after create flow completes
+- [x] Keep existing JSON/base64 path as fallback
+  - Non-multipart requests fall through to the existing JSON body parsing path
+  - `writeUploadedArchive` in create-flow.ts checks `source.archivePath` first (multipart), then falls back to base64 decoding
+- [x] Add upload size limits as Fastify plugin config
+  - `uploadMaxBytes` option on `AppDependencies` (default 50 MiB); passed to `@fastify/multipart` `limits.fileSize`
+  - Truncated uploads detected via `part.file.truncated` and return 413 with `UPLOAD_TOO_LARGE` error
+  - Fix: added `archivePath` to the uploaded-archive Zod schema so it survives `podCreateRequestSchema.parse()`
 
 ### F. Smarter Scheduling (priority: lower)
 - [ ] Add job priority levels (low/normal/high/critical)

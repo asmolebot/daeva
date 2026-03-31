@@ -1,4 +1,4 @@
-import { cpSync, lstatSync, mkdtempSync, mkdirSync, opendirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, lstatSync, mkdtempSync, mkdirSync, opendirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -303,6 +303,21 @@ const cloneAndMaterializeGitPackage = (
 
 const writeUploadedArchive = (source: UploadedArchiveRegistrySource, archivePath: string) => {
   assertArchiveFilename(source.filename);
+
+  // Multipart path: archive already streamed to disk
+  if (source.archivePath) {
+    const stats = statSync(source.archivePath);
+    if (stats.size === 0) {
+      throw new Error('uploaded archive payload decoded to zero bytes');
+    }
+    if (stats.size > MAX_ARCHIVE_BYTES) {
+      throw new Error(`uploaded archive exceeds ${Math.floor(MAX_ARCHIVE_BYTES / (1024 * 1024))} MiB limit`);
+    }
+    copyFileSync(source.archivePath, archivePath);
+    return;
+  }
+
+  // JSON/base64 path
   const normalized = source.archiveBase64.includes(',')
     ? source.archiveBase64.split(',').pop() ?? source.archiveBase64
     : source.archiveBase64;

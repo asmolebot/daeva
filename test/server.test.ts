@@ -105,6 +105,31 @@ cpSync(path.join(fixtureRoot, 'examples', 'whisper-pod-package'), archivePackage
 const tarGzPath = path.join(archiveFixtureRoot, 'whisper-package.tar.gz');
 execFileSync('tar', ['-czf', tarGzPath, '-C', archiveFixtureRoot, 'archive-package'], { stdio: 'pipe' });
 const archiveBase64 = readFileSync(tarGzPath).toString('base64');
+const archiveBytes = readFileSync(tarGzPath);
+
+/** Build a multipart/form-data payload buffer with the given parts. */
+const buildMultipart = (
+  parts: Array<{ name: string; value: string } | { name: string; filename: string; content: Buffer; contentType: string }>
+) => {
+  const boundary = '----AsmoTestBoundary' + Date.now();
+  const chunks: Buffer[] = [];
+
+  for (const part of parts) {
+    chunks.push(Buffer.from(`--${boundary}\r\n`));
+    if ('filename' in part) {
+      chunks.push(Buffer.from(`Content-Disposition: form-data; name="${part.name}"; filename="${part.filename}"\r\n`));
+      chunks.push(Buffer.from(`Content-Type: ${part.contentType}\r\n\r\n`));
+      chunks.push(part.content);
+    } else {
+      chunks.push(Buffer.from(`Content-Disposition: form-data; name="${part.name}"\r\n\r\n`));
+      chunks.push(Buffer.from(part.value));
+    }
+    chunks.push(Buffer.from('\r\n'));
+  }
+  chunks.push(Buffer.from(`--${boundary}--\r\n`));
+
+  return { body: Buffer.concat(chunks), contentType: `multipart/form-data; boundary=${boundary}` };
+};
 
 const installRoot = mkdtempSync(path.join(os.tmpdir(), 'asmo-pod-orch-installed-'));
 const storageFilePath = path.join(installRoot, 'installed-packages.json');
@@ -398,5 +423,85 @@ describe('HTTP API', () => {
     expect(jobsBody.summary.limit).toBe(1);
     expect(jobsBody.jobs).toHaveLength(1);
     expect(jobsBody.jobs[0].status).toBe('completed');
+  });
+
+  it('materializes a multipart archive upload through POST /pods/create', async () => {
+    const { body, contentType } = buildMultipart([
+      { name: 'alias', value: 'multipart-whisper' },
+      { name: 'subpath', value: 'archive-package' },
+      { name: 'packageManifestPath', value: 'pod-package.json' },
+      { name: 'archive', filename: 'whisper-package.tar.gz', content: archiveBytes, contentType: 'application/gzip' }
+    ]);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/pods/create',
+      headers: { 'content-type': contentType },
+      payload: body
+    });
+
+    if (response.statusCode !== 201) {
+      console.error('MULTIPART DEBUG:', response.statusCode, response.body);
+    }
+    expect(response.statusCode).toBe(201);
+    const responseBody = response.json();
+    expect(responseBody.create.alias).toBe('multipart-whisper');
+    expect(responseBody.create.resolvedSource.kind).toBe('uploaded-archive');
+    expect(responseBody.create.materialization.status).toBe('installed');
+    expect(responseBody.create.materialization.installedPackage.manifest.pod.id).toBe('whisper');
+  });
+
+  it('rejects oversized multipart archive uploads with 413', async () => {
+    // Build a separate app with a tiny upload limit
+    const tinyApp = (await buildApp({
+      registry: new PodRegistry(testManifests()),
+      podController: new PodController(registry.list()),
+      installedPackageStore: new InstalledPackageStore(),
+      projectRoot: fixtureRoot,
+      managedPackagesRoot: path.join(installRoot, 'tiny-materialized'),
+      uploadMaxBytes: 128 // 128 bytes — far smaller than any real archive
+    })).app;
+
+    try {
+      const { body, contentType } = buildMultipart([
+        { name: 'alias', value: 'oversized-test' },
+        { name: 'archive', filename: 'big.tar.gz', content: archiveBytes, contentType: 'application/gzip' }
+      ]);
+
+      const response = await tinyApp.inject({
+        method: 'POST',
+        url: '/pods/create',
+        headers: { 'content-type': contentType },
+        payload: body
+      });
+
+      expect(response.statusCode).toBe(413);
+      expect(response.json().error.code).toBe('UPLOAD_TOO_LARGE');
+    } finally {
+      await tinyApp.close();
+    }
+  });
+
+  it('still accepts JSON/base64 archive uploads as fallback on POST /pods/create', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/pods/create',
+      payload: {
+        alias: 'json-fallback-whisper',
+        source: {
+          kind: 'uploaded-archive',
+          filename: 'whisper-package.tar.gz',
+          archiveBase64,
+          subpath: 'archive-package',
+          packageManifestPath: 'pod-package.json'
+        }
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    const responseBody = response.json();
+    expect(responseBody.create.alias).toBe('json-fallback-whisper');
+    expect(responseBody.create.resolvedSource.kind).toBe('uploaded-archive');
+    expect(responseBody.create.materialization.status).toBe('installed');
   });
 });

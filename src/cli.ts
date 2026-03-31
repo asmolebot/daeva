@@ -13,7 +13,8 @@ const start = async () => {
     rateLimit: {
       max: process.env.ASMO_RATE_LIMIT_MAX ? Number.parseInt(process.env.ASMO_RATE_LIMIT_MAX, 10) : undefined,
       windowMs: process.env.ASMO_RATE_LIMIT_WINDOW_MS ? Number.parseInt(process.env.ASMO_RATE_LIMIT_WINDOW_MS, 10) : undefined
-    }
+    },
+    uploadMaxBytes: process.env.ASMO_UPLOAD_MAX_BYTES ? Number.parseInt(process.env.ASMO_UPLOAD_MAX_BYTES, 10) : undefined
   });
 
   try {

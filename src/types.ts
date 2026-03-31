@@ -267,6 +267,8 @@ export interface UploadedArchiveRegistrySource {
   contentType?: string;
   subpath?: string;
   packageManifestPath?: string;
+  /** Internal: path to a pre-written archive file (set by multipart upload handler). */
+  archivePath?: string;
 }
 
 export interface RegistryIndexRegistrySource {
