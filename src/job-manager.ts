@@ -1,6 +1,7 @@
 import { HttpPodAdapter, type PodAdapter } from './adapters.js';
 import { AppError, NotFoundError } from './errors.js';
 import { createFailedResult, inferCapabilityForJobType, validateJobRequest } from './job-contracts.js';
+import { InMemoryJobStore, type JobStore } from './job-store.js';
 import { PodController } from './pod-controller.js';
 import { PodRegistry } from './registry.js';
 import { SchedulerRouter } from './router.js';
@@ -9,6 +10,7 @@ import { nowIso, randomId } from './utils.js';
 
 export interface JobManagerOptions {
   adapter?: PodAdapter;
+  store?: JobStore;
 }
 
 const serializeJobFailure = (error: unknown): JobFailureInfo => {
@@ -37,7 +39,7 @@ const serializeJobFailure = (error: unknown): JobFailureInfo => {
 };
 
 export class JobManager {
-  private readonly jobs = new Map<string, JobRecord>();
+  private readonly store: JobStore;
   private readonly queue: string[] = [];
   private readonly adapter: PodAdapter;
   private processing = false;
@@ -49,6 +51,7 @@ export class JobManager {
     options: JobManagerOptions = {}
   ) {
     this.adapter = options.adapter ?? new HttpPodAdapter();
+    this.store = options.store ?? new InMemoryJobStore();
   }
 
   enqueue(request: JobRequest): JobRecord {
@@ -63,20 +66,18 @@ export class JobManager {
       resolvedCapability: capability
     };
 
-    this.jobs.set(job.id, job);
+    this.store.save(job);
     this.queue.push(job.id);
     void this.processNext();
     return job;
   }
 
   listJobs(): JobRecord[] {
-    return [...this.jobs.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return this.store.list();
   }
 
   listRecentJobs(limit = 10): JobRecord[] {
-    return [...this.jobs.values()]
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .slice(0, limit);
+    return this.store.listRecent(limit);
   }
 
   getQueueDepth(): number {
@@ -88,7 +89,7 @@ export class JobManager {
   }
 
   getJob(id: string): JobRecord {
-    const job = this.jobs.get(id);
+    const job = this.store.get(id);
     if (!job) {
       throw new NotFoundError(`Job not found: ${id}`, { details: { jobId: id } });
     }
@@ -133,6 +134,7 @@ export class JobManager {
       job.selectedPodId = pod.id;
       job.resolvedCapability = job.resolvedCapability ?? job.request.capability ?? inferCapabilityForJobType(job.request.type);
 
+      this.store.save(job);
       this.podController.markJobStarted(pod.id, job.id);
       const result = await this.adapter.execute(pod, job.request);
       const completedAt = nowIso();
@@ -148,6 +150,7 @@ export class JobManager {
             retriable: result.output.error.retriable
           }
         : undefined;
+      this.store.save(job);
       this.podController.markJobFinished(pod.id);
     } catch (error) {
       const failedAt = nowIso();
@@ -161,6 +164,7 @@ export class JobManager {
         job.resolvedCapability,
         error
       );
+      this.store.save(job);
       if (job.selectedPodId) {
         this.podController.markJobFinished(job.selectedPodId);
       }

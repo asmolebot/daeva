@@ -38,12 +38,23 @@ Goal: Make asmo-pod-orchestrator actually execute real workloads end-to-end, per
   - Shutdown errors are caught, logged to stderr, pod still marked as stopped
 
 ### C. Persistent Job Store (priority: high)
-- [ ] Add SQLite-backed job store (better-sqlite3 or similar)
-- [ ] Migrate JobManager from in-memory Map to SQLite
-- [ ] Persist job state transitions (queued → running → completed/failed)
-- [ ] Persist job results and error payloads
-- [ ] Add job expiration/cleanup (configurable TTL)
-- [ ] Ensure backward-compatible API responses
+- [x] Add SQLite-backed job store (better-sqlite3 or similar)
+  - `better-sqlite3` added as production dependency; `@types/better-sqlite3` as dev dependency
+  - New `JobStore` interface in `src/job-store.ts` with `InMemoryJobStore` (default) and `SqliteJobStore` implementations
+- [x] Migrate JobManager from in-memory Map to SQLite
+  - `JobManager` accepts optional `store: JobStore` in options; defaults to `InMemoryJobStore` for backward compat
+  - Pass `SqliteJobStore` via `JobManagerOptions.store` to enable persistence
+- [x] Persist job state transitions (queued → running → completed/failed)
+  - `JobManager.processNext()` calls `store.save(job)` after each state mutation
+  - On restart, running jobs are marked failed with `PROCESS_RESTART` error; queued jobs recoverable via `getQueuedJobIds()`
+- [x] Persist job results and error payloads
+  - `result` and `error` fields serialized as JSON in SQLite; full round-trip fidelity verified by tests
+- [x] Add job expiration/cleanup (configurable TTL)
+  - `ASMO_JOB_TTL_MS` env var (default 24h); `SqliteJobStore.cleanup(ttlMs)` removes expired completed/failed jobs
+  - Auto-cleanup timer (default 1h interval, `.unref()`'d so it doesn't block process exit)
+  - DB path configurable via `ASMO_JOB_DB_PATH` env var (default `./data/jobs.db`)
+- [x] Ensure backward-compatible API responses
+  - All existing `JobManager` public methods preserved; routes unchanged; 131 tests pass (19 new)
 
 ### D. Auth & Rate Limiting (priority: medium)
 - [ ] Add optional API key authentication (Bearer token)

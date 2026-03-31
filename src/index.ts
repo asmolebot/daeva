@@ -3,6 +3,7 @@ export * from './create-flow.js';
 export * from './errors.js';
 export * from './installed-package-store.js';
 export * from './job-manager.js';
+export * from './job-store.js';
 export * from './manifest-loader.js';
 export * from './manifests/builtin.js';
 export * from './schemas.js';
