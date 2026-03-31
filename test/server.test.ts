@@ -117,7 +117,7 @@ const router = new SchedulerRouter(registry, podController);
 const jobManager = new JobManager(registry, podController, router, {
   adapter: new RecordingAdapter()
 });
-const { app } = buildApp({
+const { app } = await buildApp({
   registry,
   podController,
   router,

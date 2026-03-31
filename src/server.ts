@@ -1,5 +1,7 @@
 import Fastify from 'fastify';
+import rateLimit from '@fastify/rate-limit';
 
+import { authPlugin, type AuthPluginOptions } from './auth.js';
 import { createFromAlias } from './create-flow.js';
 import { AppError, NotFoundError } from './errors.js';
 import { InstalledPackageStore } from './installed-package-store.js';
@@ -27,9 +29,11 @@ export interface AppDependencies {
   projectRoot?: string;
   managedPackagesRoot?: string;
   runtimeInspector?: RuntimeInspector;
+  auth?: AuthPluginOptions;
+  rateLimit?: { max?: number; windowMs?: number };
 }
 
-export const buildApp = (dependencies: AppDependencies = {}) => {
+export const buildApp = async (dependencies: AppDependencies = {}) => {
   const registry = dependencies.registry ?? new PodRegistry();
   const podController = dependencies.podController ?? new PodController(registry.list());
   const router = dependencies.router ?? new SchedulerRouter(registry, podController);
@@ -37,6 +41,17 @@ export const buildApp = (dependencies: AppDependencies = {}) => {
   const installedPackageStore = dependencies.installedPackageStore ?? new InstalledPackageStore();
 
   const app = Fastify({ logger: false });
+
+  // Auth plugin (enabled when apiKeys provided)
+  await app.register(authPlugin, dependencies.auth ?? {});
+
+  // Rate limiting
+  const rlMax = dependencies.rateLimit?.max ?? 100;
+  const rlWindowMs = dependencies.rateLimit?.windowMs ?? 60_000;
+  await app.register(rateLimit, {
+    max: rlMax,
+    timeWindow: rlWindowMs
+  });
 
   app.get('/health', async () => ({ ok: true }));
 
@@ -156,6 +171,19 @@ export const buildApp = (dependencies: AppDependencies = {}) => {
           details: {
             issues: 'issues' in error ? error.issues : undefined
           }
+        }
+      });
+      return;
+    }
+
+    // Rate limit errors from @fastify/rate-limit
+    if (error.statusCode === 429) {
+      reply.code(429).send({
+        error: {
+          code: 'RATE_LIMITED',
+          type: 'rate-limit',
+          message: error.message,
+          retriable: true
         }
       });
       return;
