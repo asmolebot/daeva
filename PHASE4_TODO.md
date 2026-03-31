@@ -57,10 +57,15 @@ Goal: Make asmo-pod-orchestrator actually execute real workloads end-to-end, per
   - All existing `JobManager` public methods preserved; routes unchanged; 131 tests pass (19 new)
 
 ### D. Auth & Rate Limiting (priority: medium)
-- [ ] Add optional API key authentication (Bearer token)
-- [ ] Add per-key or global rate limiting
-- [ ] Add configurable auth bypass for localhost
-- [ ] Store API keys in config/env (not hardcoded)
+- [x] Add optional API key authentication (Bearer token)
+  - `authPlugin` in `src/auth.ts`; enabled when `apiKeys` option is set (comma-separated)
+  - Bearer token validation; 401 with structured error for missing/invalid keys
+- [x] Add per-key or global rate limiting
+  - `@fastify/rate-limit` wired into `buildApp`; configurable `max` and `windowMs`; returns 429 with structured error
+- [x] Add configurable auth bypass for localhost
+  - Localhost (127.0.0.1, ::1) bypasses auth by default; `requireLocalhost: true` disables bypass
+- [x] Store API keys in config/env (not hardcoded)
+  - Keys passed via `AuthPluginOptions.apiKeys`; CLI reads from `ASMO_API_KEYS` env var (comma-separated)
 
 ### E. Multipart Archive Uploads (priority: medium)
 - [ ] Add multipart/form-data upload support on `POST /pods/create`
