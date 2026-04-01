@@ -270,7 +270,9 @@ export const buildApp = async (dependencies: AppDependencies = {}) => {
 
   app.get('/jobs/:jobId', async (request) => {
     const params = request.params as { jobId: string };
-    return { job: jobManager.getJob(params.jobId) };
+    const job = jobManager.getJob(params.jobId);
+    const queuePosition = job.status === 'queued' ? jobManager.getQueuePosition(params.jobId) : null;
+    return { job, queuePosition };
   });
 
   app.get('/jobs/:jobId/result', async (request) => {

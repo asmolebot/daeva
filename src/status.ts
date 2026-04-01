@@ -148,8 +148,8 @@ export const buildSchedulerStatus = (registry: PodRegistry, podController: PodCo
       group,
       podIds: entries.map((entry) => entry.manifest.id),
       runningPodIds: entries.filter((entry) => entry.status === 'running').map((entry) => entry.manifest.id),
-      busyPodIds: entries.filter((entry) => entry.currentJobId).map((entry) => entry.manifest.id),
-      activeJobIds: entries.flatMap((entry) => (entry.currentJobId ? [entry.currentJobId] : []))
+      busyPodIds: entries.filter((entry) => entry.activeJobIds.length > 0).map((entry) => entry.manifest.id),
+      activeJobIds: entries.flatMap((entry) => entry.activeJobIds)
     }));
 
   return {

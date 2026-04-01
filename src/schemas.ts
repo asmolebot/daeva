@@ -105,6 +105,8 @@ export const podManifestSchema = z.object({
    */
   shutdown: lifecycleCommandSchema.optional(),
   exclusivityGroup: z.string().optional(),
+  costWeight: z.number().positive().optional(),
+  maxConcurrentJobs: z.number().int().positive().optional(),
   metadata: metadataRecordSchema.optional()
 });
 
@@ -184,10 +186,13 @@ const jobFileInputSchema = z.discriminatedUnion('source', [
   })
 ]);
 
+const jobPrioritySchema = z.enum(['low', 'normal', 'high', 'critical']);
+
 export const jobRequestSchema = z.object({
   type: z.string().min(1),
   capability: podCapabilitySchema.optional(),
   preferredPodId: z.string().min(1).optional(),
+  priority: jobPrioritySchema.optional(),
   input: metadataRecordSchema,
   files: z.array(jobFileInputSchema).max(16).optional(),
   metadata: metadataRecordSchema.optional()

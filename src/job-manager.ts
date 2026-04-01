@@ -5,12 +5,25 @@ import { InMemoryJobStore, type JobStore } from './job-store.js';
 import { PodController } from './pod-controller.js';
 import { PodRegistry } from './registry.js';
 import { SchedulerRouter } from './router.js';
-import type { JobFailureInfo, JobRecord, JobRequest } from './types.js';
+import type { JobFailureInfo, JobPriority, JobRecord, JobRequest, PodManifest } from './types.js';
 import { nowIso, randomId } from './utils.js';
 
 export interface JobManagerOptions {
   adapter?: PodAdapter;
   store?: JobStore;
+}
+
+/** Numeric priority values — lower number = higher priority. */
+const PRIORITY_VALUES: Record<JobPriority, number> = {
+  critical: 0,
+  high: 1,
+  normal: 2,
+  low: 3
+};
+
+interface QueueEntry {
+  id: string;
+  priority: number;
 }
 
 const serializeJobFailure = (error: unknown): JobFailureInfo => {
@@ -40,9 +53,10 @@ const serializeJobFailure = (error: unknown): JobFailureInfo => {
 
 export class JobManager {
   private readonly store: JobStore;
-  private readonly queue: string[] = [];
+  private readonly queue: QueueEntry[] = [];
   private readonly adapter: PodAdapter;
-  private processing = false;
+  private scheduling = false;
+  private readonly runningJobs = new Set<string>();
   private readonly abortControllers = new Map<string, AbortController>();
 
   constructor(
@@ -57,18 +71,30 @@ export class JobManager {
 
   enqueue(request: JobRequest): JobRecord {
     const capability = validateJobRequest(request);
+    const priority: JobPriority = request.priority ?? 'normal';
     const now = nowIso();
     const job: JobRecord = {
       id: randomId('job'),
       createdAt: now,
       updatedAt: now,
       status: 'queued',
+      priority,
       request,
       resolvedCapability: capability
     };
 
     this.store.save(job);
-    this.queue.push(job.id);
+
+    // Insert into queue in priority order (lower value = higher priority, FIFO within same level)
+    const pVal = PRIORITY_VALUES[priority];
+    const insertIdx = this.queue.findIndex((entry) => entry.priority > pVal);
+    const queueEntry: QueueEntry = { id: job.id, priority: pVal };
+    if (insertIdx === -1) {
+      this.queue.push(queueEntry);
+    } else {
+      this.queue.splice(insertIdx, 0, queueEntry);
+    }
+
     void this.processNext();
     return job;
   }
@@ -86,7 +112,13 @@ export class JobManager {
   }
 
   isProcessing(): boolean {
-    return this.processing;
+    return this.runningJobs.size > 0;
+  }
+
+  /** Get the 1-based queue position of a job, or null if not queued. */
+  getQueuePosition(jobId: string): number | null {
+    const idx = this.queue.findIndex((entry) => entry.id === jobId);
+    return idx === -1 ? null : idx + 1;
   }
 
   getJob(id: string): JobRecord {
@@ -117,7 +149,7 @@ export class JobManager {
     }
 
     if (job.status === 'queued') {
-      const queueIdx = this.queue.indexOf(id);
+      const queueIdx = this.queue.findIndex((entry) => entry.id === id);
       if (queueIdx !== -1) {
         this.queue.splice(queueIdx, 1);
       }
@@ -142,7 +174,7 @@ export class JobManager {
       job.error = { code: 'JOB_CANCELLED', message: 'Job cancelled by user', retriable: false };
       this.store.save(job);
       if (job.selectedPodId) {
-        this.podController.markJobFinished(job.selectedPodId);
+        this.podController.markJobFinished(job.selectedPodId, id);
       }
       return { ok: true };
     }
@@ -151,38 +183,92 @@ export class JobManager {
   }
 
   async waitForIdle(): Promise<void> {
-    while (this.processing || this.queue.length > 0) {
+    while (this.runningJobs.size > 0 || this.queue.length > 0 || this.scheduling) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
   }
 
   private async processNext(): Promise<void> {
-    if (this.processing) {
-      return;
-    }
-
-    const nextJobId = this.queue.shift();
-    if (!nextJobId) {
-      return;
-    }
-
-    this.processing = true;
-    const job = this.getJob(nextJobId);
-
-    const ac = new AbortController();
-    this.abortControllers.set(nextJobId, ac);
+    if (this.scheduling) return;
+    this.scheduling = true;
 
     try {
-      const pod = await this.router.route(job.request);
-      const startedAt = nowIso();
-      job.status = 'running';
-      job.startedAt = startedAt;
-      job.updatedAt = startedAt;
-      job.selectedPodId = pod.id;
-      job.resolvedCapability = job.resolvedCapability ?? job.request.capability ?? inferCapabilityForJobType(job.request.type);
+      while (this.queue.length > 0) {
+        const entry = this.queue[0];
+        const job = this.store.get(entry.id);
 
-      this.store.save(job);
-      this.podController.markJobStarted(pod.id, job.id);
+        // Skip cancelled/missing jobs
+        if (!job || job.status === 'cancelled') {
+          this.queue.shift();
+          continue;
+        }
+
+        let pod: PodManifest;
+        try {
+          pod = this.router.selectPod(job.request);
+        } catch (error) {
+          this.queue.shift();
+          const failedAt = nowIso();
+          job.status = 'failed';
+          job.updatedAt = failedAt;
+          job.completedAt = failedAt;
+          job.error = serializeJobFailure(error);
+          job.result = createFailedResult(undefined, job.request, job.resolvedCapability, error);
+          this.store.save(job);
+          continue;
+        }
+
+        // Check per-pod concurrency limit
+        const maxConcurrent = pod.maxConcurrentJobs ?? 1;
+        if (this.podController.getActiveJobCount(pod.id) >= maxConcurrent) {
+          break; // pod at capacity, wait for a slot
+        }
+
+        this.queue.shift();
+
+        // Ensure pod is started (handles exclusivity groups)
+        try {
+          await this.podController.ensureExclusive(pod, this.registry.list());
+        } catch (error) {
+          const failedAt = nowIso();
+          job.status = 'failed';
+          job.updatedAt = failedAt;
+          job.completedAt = failedAt;
+          job.error = serializeJobFailure(error);
+          job.result = createFailedResult(
+            this.registry.get(pod.id),
+            job.request,
+            job.resolvedCapability,
+            error
+          );
+          this.store.save(job);
+          continue;
+        }
+
+        // Mark as running
+        const ac = new AbortController();
+        this.abortControllers.set(job.id, ac);
+        const startedAt = nowIso();
+        job.status = 'running';
+        job.startedAt = startedAt;
+        job.updatedAt = startedAt;
+        job.selectedPodId = pod.id;
+        job.resolvedCapability =
+          job.resolvedCapability ?? job.request.capability ?? inferCapabilityForJobType(job.request.type);
+        this.store.save(job);
+        this.podController.markJobStarted(pod.id, job.id);
+        this.runningJobs.add(job.id);
+
+        // Execute in background (don't await — allows concurrent jobs)
+        void this.executeJob(job, pod);
+      }
+    } finally {
+      this.scheduling = false;
+    }
+  }
+
+  private async executeJob(job: JobRecord, pod: PodManifest): Promise<void> {
+    try {
       const result = await this.adapter.execute(pod, job.request);
       // Skip state mutation if job was cancelled while running
       if (job.status !== 'cancelled') {
@@ -200,7 +286,7 @@ export class JobManager {
             }
           : undefined;
         this.store.save(job);
-        this.podController.markJobFinished(pod.id);
+        this.podController.markJobFinished(pod.id, job.id);
       }
     } catch (error) {
       // Skip state mutation if job was cancelled while running
@@ -218,12 +304,13 @@ export class JobManager {
         );
         this.store.save(job);
         if (job.selectedPodId) {
-          this.podController.markJobFinished(job.selectedPodId);
+          this.podController.markJobFinished(job.selectedPodId, job.id);
         }
       }
     } finally {
-      this.abortControllers.delete(nextJobId);
-      this.processing = false;
+      this.abortControllers.delete(job.id);
+      this.runningJobs.delete(job.id);
+      // Re-trigger scheduling when a slot frees up
       if (this.queue.length > 0) {
         void this.processNext();
       }

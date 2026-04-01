@@ -1,6 +1,7 @@
 export type PodCapability = 'image-generation' | 'speech-to-text' | 'ocr' | 'vision';
 export type PodLifecycleStatus = 'stopped' | 'starting' | 'running' | 'stopping';
 export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type JobPriority = 'low' | 'normal' | 'high' | 'critical';
 export type HttpMethod = 'GET' | 'POST';
 export type PodManifestVersion = '1';
 export type PodPackageSchemaVersion = '1';
@@ -140,6 +141,10 @@ export interface PodManifest {
     timeoutMs?: number;
   };
   exclusivityGroup?: string;
+  /** Relative cost weight for capability-aware routing (lower = cheaper/preferred). Default: 1. */
+  costWeight?: number;
+  /** Maximum concurrent jobs this pod can handle simultaneously. Default: 1. */
+  maxConcurrentJobs?: number;
   metadata?: Record<string, unknown>;
 }
 
@@ -344,6 +349,7 @@ export interface JobRequest {
   type: string;
   capability?: PodCapability;
   preferredPodId?: string;
+  priority?: JobPriority;
   input: Record<string, unknown>;
   files?: JobFileInput[];
   metadata?: Record<string, unknown>;
@@ -471,6 +477,7 @@ export interface JobRecord {
   createdAt: string;
   updatedAt: string;
   status: JobStatus;
+  priority: JobPriority;
   request: JobRequest;
   selectedPodId?: string;
   resolvedCapability?: PodCapability;

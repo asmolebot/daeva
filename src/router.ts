@@ -37,10 +37,29 @@ export class SchedulerRouter {
       });
     }
 
-    const runningCandidate = candidates.find(
-      (candidate) => this.podController.getStatus(candidate.id) === 'running'
+    // Sort by cost weight (lower = cheaper/preferred)
+    const sorted = [...candidates].sort(
+      (a, b) => (a.costWeight ?? 1) - (b.costWeight ?? 1)
     );
 
-    return runningCandidate ?? candidates[0];
+    // Prefer a running pod with available capacity
+    const runningWithCapacity = sorted.find((candidate) => {
+      if (this.podController.getStatus(candidate.id) !== 'running') return false;
+      const active = this.podController.getActiveJobCount(candidate.id);
+      const max = candidate.maxConcurrentJobs ?? 1;
+      return active < max;
+    });
+    if (runningWithCapacity) return runningWithCapacity;
+
+    // Fall back to any pod not at capacity (may need startup)
+    const withCapacity = sorted.find((candidate) => {
+      const active = this.podController.getActiveJobCount(candidate.id);
+      const max = candidate.maxConcurrentJobs ?? 1;
+      return active < max;
+    });
+    if (withCapacity) return withCapacity;
+
+    // All at capacity — return cheapest (caller should check capacity)
+    return sorted[0];
   }
 }

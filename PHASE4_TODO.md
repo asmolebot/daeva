@@ -84,10 +84,20 @@ Goal: Make asmo-pod-orchestrator actually execute real workloads end-to-end, per
   - Fix: added `archivePath` to the uploaded-archive Zod schema so it survives `podCreateRequestSchema.parse()`
 
 ### F. Smarter Scheduling (priority: lower)
-- [ ] Add job priority levels (low/normal/high/critical)
-- [ ] Add per-pod concurrency limits
-- [ ] Add capability-aware cost routing (prefer cheaper/faster pod when multiple match)
-- [ ] Add job queue position reporting
+- [x] Add job priority levels (low/normal/high/critical)
+  - `JobPriority` type (`low`/`normal`/`high`/`critical`); optional `priority` field on `JobRequest`
+  - Priority-ordered queue insertion (higher priority jobs dequeued first, FIFO within same level)
+  - `priority` field persisted on `JobRecord` (defaults to `normal`)
+- [x] Add per-pod concurrency limits
+  - `maxConcurrentJobs` field on `PodManifest` (default: 1); validated by Zod schema
+  - `PodController` tracks multiple active jobs per pod via `Set<string>`; `getActiveJobCount(podId)` API
+  - `JobManager` supports concurrent job execution; scheduling loop respects per-pod limits
+- [x] Add capability-aware cost routing (prefer cheaper/faster pod when multiple match)
+  - `costWeight` field on `PodManifest` (default: 1, lower = cheaper/preferred); validated by Zod schema
+  - `SchedulerRouter.selectPod()` sorts candidates by `costWeight`, prefers running pods with available capacity
+- [x] Add job queue position reporting
+  - `JobManager.getQueuePosition(jobId)` returns 1-based position or null
+  - `GET /jobs/:id` response includes `queuePosition` field (null when not queued)
 - [x] Add job cancellation support
   - `POST /jobs/:id/cancel` endpoint; queued jobs immediately transition to `cancelled`; running jobs abort via AbortController
   - New `cancelled` terminal state alongside `completed`/`failed`; `ConflictError` (409) for already-terminal jobs

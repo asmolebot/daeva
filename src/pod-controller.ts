@@ -30,7 +30,7 @@ export interface LifecycleCommandResult {
 
 interface PodRuntimeState {
   status: PodLifecycleStatus;
-  currentJobId?: string;
+  activeJobIds: Set<string>;
   lastStartedAt?: string;
   lastStoppedAt?: string;
   /** Last lifecycle command output, for debugging. */
@@ -46,8 +46,15 @@ export interface PodControllerOptions {
   templateContext?: TemplateContext;
 }
 
-export interface ManagedPodState extends PodRuntimeState {
+export interface ManagedPodState {
   manifest: PodManifest;
+  status: PodLifecycleStatus;
+  /** First active job ID (backward compat). */
+  currentJobId?: string;
+  /** All active job IDs on this pod. */
+  activeJobIds: string[];
+  lastStartedAt?: string;
+  lastStoppedAt?: string;
 }
 
 export class PodController {
@@ -57,13 +64,13 @@ export class PodController {
   constructor(manifests: PodManifest[], options: PodControllerOptions = {}) {
     this.templateCtx = buildContext(options.templateContext ?? {});
     manifests.forEach((manifest) => {
-      this.states.set(manifest.id, { status: 'stopped' });
+      this.states.set(manifest.id, { status: 'stopped', activeJobIds: new Set() });
     });
   }
 
   syncManifest(manifest: PodManifest): void {
     if (!this.states.has(manifest.id)) {
-      this.states.set(manifest.id, { status: 'stopped' });
+      this.states.set(manifest.id, { status: 'stopped', activeJobIds: new Set() });
     }
   }
 
@@ -81,11 +88,25 @@ export class PodController {
     return this.states.get(podId)?.lastLifecycleOutput;
   }
 
+  /** Get the number of currently active jobs on a pod. */
+  getActiveJobCount(podId: string): number {
+    const state = this.states.get(podId);
+    return state ? state.activeJobIds.size : 0;
+  }
+
   snapshot(manifests: PodManifest[]): ManagedPodState[] {
-    return manifests.map((manifest) => ({
-      manifest,
-      ...(this.states.get(manifest.id) ?? { status: 'stopped' as const })
-    }));
+    return manifests.map((manifest) => {
+      const state = this.states.get(manifest.id) ?? { status: 'stopped' as const, activeJobIds: new Set<string>() };
+      const ids = [...state.activeJobIds];
+      return {
+        manifest,
+        status: state.status,
+        currentJobId: ids[0],
+        activeJobIds: ids,
+        lastStartedAt: state.lastStartedAt,
+        lastStoppedAt: state.lastStoppedAt,
+      };
+    });
   }
 
   async start(manifest: PodManifest): Promise<void> {
@@ -121,8 +142,9 @@ export class PodController {
       return;
     }
 
-    if (state.currentJobId) {
-      throw new SchedulingError(`Cannot stop pod ${manifest.id} while job ${state.currentJobId} is running`);
+    if (state.activeJobIds.size > 0) {
+      const jobList = [...state.activeJobIds].join(', ');
+      throw new SchedulingError(`Cannot stop pod ${manifest.id} while ${state.activeJobIds.size} job(s) are running: ${jobList}`);
     }
 
     state.status = 'stopping';
@@ -160,7 +182,7 @@ export class PodController {
       }
 
       const state = this.requireState(candidate.id);
-      if (state.status === 'running' && !state.currentJobId) {
+      if (state.status === 'running' && state.activeJobIds.size === 0) {
         await this.stop(candidate);
       }
     }
@@ -170,13 +192,13 @@ export class PodController {
 
   markJobStarted(podId: string, jobId: string): void {
     const state = this.requireState(podId);
-    state.currentJobId = jobId;
+    state.activeJobIds.add(jobId);
     state.status = 'running';
   }
 
-  markJobFinished(podId: string): void {
+  markJobFinished(podId: string, jobId: string): void {
     const state = this.requireState(podId);
-    state.currentJobId = undefined;
+    state.activeJobIds.delete(jobId);
     if (state.status === 'stopping') {
       return;
     }
