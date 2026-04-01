@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-import type { JobRecord, JobStatus } from './types.js';
+import type { JobPriority, JobRecord, JobStatus } from './types.js';
 
 /**
  * Minimal storage interface for job records.
@@ -128,6 +128,7 @@ const fromRow = (row: Record<string, unknown>): JobRecord => {
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
     status: row.status as JobStatus,
+    priority: (row.priority as JobPriority) ?? 'normal',
     request: JSON.parse(row.request as string)
   };
 

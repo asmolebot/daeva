@@ -21,6 +21,7 @@ const makeJob = (overrides: Partial<JobRecord> = {}): JobRecord => ({
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
   status: 'queued',
+  priority: 'normal',
   request: { type: 'generate-image', input: { prompt: 'test' } },
   ...overrides
 });

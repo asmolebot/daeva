@@ -309,12 +309,12 @@ export const buildApp = async (dependencies: AppDependencies = {}) => {
     }
 
     // Rate limit errors from @fastify/rate-limit
-    if (error.statusCode === 429) {
+    if ((error as { statusCode?: number }).statusCode === 429) {
       reply.code(429).send({
         error: {
           code: 'RATE_LIMITED',
           type: 'rate-limit',
-          message: error.message,
+          message: (error as Error).message,
           retriable: true
         }
       });
