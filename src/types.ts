@@ -1,6 +1,6 @@
 export type PodCapability = 'image-generation' | 'speech-to-text' | 'ocr' | 'vision';
 export type PodLifecycleStatus = 'stopped' | 'starting' | 'running' | 'stopping';
-export type JobStatus = 'queued' | 'running' | 'completed' | 'failed';
+export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type HttpMethod = 'GET' | 'POST';
 export type PodManifestVersion = '1';
 export type PodPackageSchemaVersion = '1';

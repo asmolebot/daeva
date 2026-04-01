@@ -1,5 +1,5 @@
 import { HttpPodAdapter, type PodAdapter } from './adapters.js';
-import { AppError, NotFoundError } from './errors.js';
+import { AppError, ConflictError, NotFoundError } from './errors.js';
 import { createFailedResult, inferCapabilityForJobType, validateJobRequest } from './job-contracts.js';
 import { InMemoryJobStore, type JobStore } from './job-store.js';
 import { PodController } from './pod-controller.js';
@@ -43,6 +43,7 @@ export class JobManager {
   private readonly queue: string[] = [];
   private readonly adapter: PodAdapter;
   private processing = false;
+  private readonly abortControllers = new Map<string, AbortController>();
 
   constructor(
     private readonly registry: PodRegistry,
@@ -106,6 +107,49 @@ export class JobManager {
     return job.result ?? null;
   }
 
+  cancelJob(id: string): { ok: boolean; reason?: string } {
+    const job = this.getJob(id); // throws NotFoundError if missing
+
+    if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
+      throw new ConflictError(`Job ${id} is already in terminal state: ${job.status}`, {
+        details: { jobId: id, status: job.status }
+      });
+    }
+
+    if (job.status === 'queued') {
+      const queueIdx = this.queue.indexOf(id);
+      if (queueIdx !== -1) {
+        this.queue.splice(queueIdx, 1);
+      }
+      const now = nowIso();
+      job.status = 'cancelled';
+      job.updatedAt = now;
+      job.completedAt = now;
+      job.error = { code: 'JOB_CANCELLED', message: 'Job cancelled by user', retriable: false };
+      this.store.save(job);
+      return { ok: true };
+    }
+
+    if (job.status === 'running') {
+      const ac = this.abortControllers.get(id);
+      if (ac) {
+        ac.abort();
+      }
+      const now = nowIso();
+      job.status = 'cancelled';
+      job.updatedAt = now;
+      job.completedAt = now;
+      job.error = { code: 'JOB_CANCELLED', message: 'Job cancelled by user', retriable: false };
+      this.store.save(job);
+      if (job.selectedPodId) {
+        this.podController.markJobFinished(job.selectedPodId);
+      }
+      return { ok: true };
+    }
+
+    return { ok: false, reason: `Unexpected job status: ${job.status}` };
+  }
+
   async waitForIdle(): Promise<void> {
     while (this.processing || this.queue.length > 0) {
       await new Promise((resolve) => setTimeout(resolve, 5));
@@ -125,6 +169,9 @@ export class JobManager {
     this.processing = true;
     const job = this.getJob(nextJobId);
 
+    const ac = new AbortController();
+    this.abortControllers.set(nextJobId, ac);
+
     try {
       const pod = await this.router.route(job.request);
       const startedAt = nowIso();
@@ -137,38 +184,45 @@ export class JobManager {
       this.store.save(job);
       this.podController.markJobStarted(pod.id, job.id);
       const result = await this.adapter.execute(pod, job.request);
-      const completedAt = nowIso();
-      job.status = result.status === 'failed' ? 'failed' : 'completed';
-      job.completedAt = completedAt;
-      job.updatedAt = completedAt;
-      job.result = result;
-      job.error = result.output.error
-        ? {
-            code: result.output.error.code,
-            message: result.output.error.message,
-            details: result.output.error.details,
-            retriable: result.output.error.retriable
-          }
-        : undefined;
-      this.store.save(job);
-      this.podController.markJobFinished(pod.id);
+      // Skip state mutation if job was cancelled while running
+      if (job.status !== 'cancelled') {
+        const completedAt = nowIso();
+        job.status = result.status === 'failed' ? 'failed' : 'completed';
+        job.completedAt = completedAt;
+        job.updatedAt = completedAt;
+        job.result = result;
+        job.error = result.output.error
+          ? {
+              code: result.output.error.code,
+              message: result.output.error.message,
+              details: result.output.error.details,
+              retriable: result.output.error.retriable
+            }
+          : undefined;
+        this.store.save(job);
+        this.podController.markJobFinished(pod.id);
+      }
     } catch (error) {
-      const failedAt = nowIso();
-      job.status = 'failed';
-      job.updatedAt = failedAt;
-      job.completedAt = failedAt;
-      job.error = serializeJobFailure(error);
-      job.result = createFailedResult(
-        job.selectedPodId ? this.registry.get(job.selectedPodId) : undefined,
-        job.request,
-        job.resolvedCapability,
-        error
-      );
-      this.store.save(job);
-      if (job.selectedPodId) {
-        this.podController.markJobFinished(job.selectedPodId);
+      // Skip state mutation if job was cancelled while running
+      if (job.status !== 'cancelled') {
+        const failedAt = nowIso();
+        job.status = 'failed';
+        job.updatedAt = failedAt;
+        job.completedAt = failedAt;
+        job.error = serializeJobFailure(error);
+        job.result = createFailedResult(
+          job.selectedPodId ? this.registry.get(job.selectedPodId) : undefined,
+          job.request,
+          job.resolvedCapability,
+          error
+        );
+        this.store.save(job);
+        if (job.selectedPodId) {
+          this.podController.markJobFinished(job.selectedPodId);
+        }
       }
     } finally {
+      this.abortControllers.delete(nextJobId);
       this.processing = false;
       if (this.queue.length > 0) {
         void this.processNext();

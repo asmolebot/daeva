@@ -70,6 +70,17 @@ export class JobValidationError extends AppError {
   }
 }
 
+export class ConflictError extends AppError {
+  constructor(message: string, options: Omit<AppErrorOptions, 'statusCode' | 'code' | 'type'> = {}) {
+    super(message, {
+      ...options,
+      statusCode: 409,
+      code: 'CONFLICT',
+      type: 'validation'
+    });
+  }
+}
+
 export class PodRequestError extends AppError {
   constructor(message: string, options: Omit<AppErrorOptions, 'statusCode' | 'code' | 'type'> = {}) {
     super(message, {

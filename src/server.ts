@@ -278,6 +278,12 @@ export const buildApp = async (dependencies: AppDependencies = {}) => {
     return { result: jobManager.getResult(params.jobId) };
   });
 
+  app.post('/jobs/:jobId/cancel', async (request) => {
+    const params = request.params as { jobId: string };
+    const result = jobManager.cancelJob(params.jobId);
+    return { cancelled: result.ok, jobId: params.jobId, reason: result.reason };
+  });
+
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof AppError) {
       reply.code(error.statusCode).send(error.toResponseBody());

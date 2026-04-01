@@ -482,6 +482,117 @@ describe('HTTP API', () => {
     }
   });
 
+  it('cancels a queued job via POST /jobs/:jobId/cancel', async () => {
+    // Build a separate app with a slow adapter so a job stays queued
+    class SlowAdapter {
+      async execute(manifest: PodManifest, request: JobRequest) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        return {
+          status: 'succeeded' as const,
+          pod: { id: manifest.id, nickname: manifest.nickname, runtime: manifest.runtime },
+          request: {
+            type: request.type,
+            capability: request.capability ?? inferCapabilityForJobType(request.type),
+            inputKeys: Object.keys(request.input),
+            files: []
+          },
+          output: { kind: inferCapabilityForJobType(request.type), raw: {} }
+        };
+      }
+    }
+
+    const slowRegistry = new PodRegistry(testManifests());
+    const slowController = new PodController(slowRegistry.list());
+    const slowRouter = new SchedulerRouter(slowRegistry, slowController);
+    const slowJobManager = new JobManager(slowRegistry, slowController, slowRouter, {
+      adapter: new SlowAdapter()
+    });
+    const { app: slowApp } = await buildApp({
+      registry: slowRegistry,
+      podController: slowController,
+      router: slowRouter,
+      jobManager: slowJobManager,
+      projectRoot: fixtureRoot,
+      managedPackagesRoot: path.join(installRoot, 'cancel-test'),
+      installedPackageStore: new InstalledPackageStore()
+    });
+
+    try {
+      // Enqueue two jobs — first runs, second is queued
+      await slowApp.inject({
+        method: 'POST',
+        url: '/jobs',
+        payload: {
+          type: 'generate-image',
+          input: { prompt: 'blocker' }
+        }
+      });
+      const secondResponse = await slowApp.inject({
+        method: 'POST',
+        url: '/jobs',
+        payload: {
+          type: 'generate-image',
+          input: { prompt: 'cancel me' }
+        }
+      });
+
+      const secondId = secondResponse.json().job.id;
+
+      // Cancel the queued job
+      const cancelResponse = await slowApp.inject({
+        method: 'POST',
+        url: `/jobs/${secondId}/cancel`
+      });
+
+      expect(cancelResponse.statusCode).toBe(200);
+      expect(cancelResponse.json().cancelled).toBe(true);
+
+      // Verify job status is cancelled
+      const jobResponse = await slowApp.inject({
+        method: 'GET',
+        url: `/jobs/${secondId}`
+      });
+      expect(jobResponse.json().job.status).toBe('cancelled');
+
+      await slowJobManager.waitForIdle();
+    } finally {
+      await slowApp.close();
+    }
+  });
+
+  it('returns 409 when cancelling an already-completed job', async () => {
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/jobs',
+      payload: {
+        type: 'transcribe-audio',
+        input: {},
+        files: [{ source: 'path', path: '/tmp/cancel-test.wav', filename: 'cancel-test.wav', contentType: 'audio/wav' }]
+      }
+    });
+
+    const jobId = createResponse.json().job.id;
+    await jobManager.waitForIdle();
+
+    const cancelResponse = await app.inject({
+      method: 'POST',
+      url: `/jobs/${jobId}/cancel`
+    });
+
+    expect(cancelResponse.statusCode).toBe(409);
+    expect(cancelResponse.json().error.code).toBe('CONFLICT');
+  });
+
+  it('returns 404 when cancelling a non-existent job', async () => {
+    const cancelResponse = await app.inject({
+      method: 'POST',
+      url: '/jobs/job_nonexistent/cancel'
+    });
+
+    expect(cancelResponse.statusCode).toBe(404);
+    expect(cancelResponse.json().error.code).toBe('NOT_FOUND');
+  });
+
   it('still accepts JSON/base64 archive uploads as fallback on POST /pods/create', async () => {
     const response = await app.inject({
       method: 'POST',

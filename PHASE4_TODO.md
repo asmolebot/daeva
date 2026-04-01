@@ -88,7 +88,10 @@ Goal: Make asmo-pod-orchestrator actually execute real workloads end-to-end, per
 - [ ] Add per-pod concurrency limits
 - [ ] Add capability-aware cost routing (prefer cheaper/faster pod when multiple match)
 - [ ] Add job queue position reporting
-- [ ] Add job cancellation support
+- [x] Add job cancellation support
+  - `POST /jobs/:id/cancel` endpoint; queued jobs immediately transition to `cancelled`; running jobs abort via AbortController
+  - New `cancelled` terminal state alongside `completed`/`failed`; `ConflictError` (409) for already-terminal jobs
+  - `JobManager.cancelJob()` removes from queue or aborts in-flight execution; cleanup/TTL includes cancelled jobs
 
 ## Working Order
 

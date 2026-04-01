@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { JobValidationError, PodRequestError } from '../src/errors.js';
+import { ConflictError, JobValidationError, PodRequestError } from '../src/errors.js';
 import { inferCapabilityForJobType } from '../src/job-contracts.js';
 import type { JobRequest, PodManifest } from '../src/types.js';
 import { JobManager } from '../src/job-manager.js';
@@ -134,5 +134,71 @@ describe('JobManager', () => {
         }
       }
     });
+  });
+
+  it('cancels a queued job and transitions it to cancelled state', async () => {
+    const registry = new PodRegistry(testManifests());
+    const controller = new PodController(registry.list());
+    const router = new SchedulerRouter(registry, controller);
+
+    // Use a slow adapter so the first job stays running while we cancel the second
+    class SlowAdapter {
+      async execute(manifest: PodManifest, request: JobRequest) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        return {
+          status: 'succeeded' as const,
+          pod: { id: manifest.id, nickname: manifest.nickname, runtime: manifest.runtime },
+          request: {
+            type: request.type,
+            capability: request.capability ?? inferCapabilityForJobType(request.type),
+            inputKeys: Object.keys(request.input),
+            files: []
+          },
+          output: { kind: inferCapabilityForJobType(request.type), raw: {} }
+        };
+      }
+    }
+
+    const manager = new JobManager(registry, controller, router, { adapter: new SlowAdapter() });
+
+    // Enqueue two jobs — first will start running, second stays queued
+    manager.enqueue({
+      type: 'generate-image',
+      input: { prompt: 'placeholder' }
+    });
+    const second = manager.enqueue({
+      type: 'generate-image',
+      input: { prompt: 'cancel me' }
+    });
+
+    // Cancel the queued job
+    const result = manager.cancelJob(second.id);
+    expect(result).toEqual({ ok: true });
+    expect(manager.getJob(second.id).status).toBe('cancelled');
+    expect(manager.getJob(second.id).error).toEqual({
+      code: 'JOB_CANCELLED',
+      message: 'Job cancelled by user',
+      retriable: false
+    });
+    expect(manager.getQueueDepth()).toBe(0);
+
+    await manager.waitForIdle();
+  });
+
+  it('throws ConflictError when cancelling a completed job', async () => {
+    const registry = new PodRegistry(testManifests());
+    const controller = new PodController(registry.list());
+    const router = new SchedulerRouter(registry, controller);
+    const manager = new JobManager(registry, controller, router, { adapter: new RecordingAdapter() });
+
+    const job = manager.enqueue({
+      type: 'generate-image',
+      input: { prompt: 'done already' }
+    });
+
+    await manager.waitForIdle();
+    expect(manager.getJob(job.id).status).toBe('completed');
+
+    expect(() => manager.cancelJob(job.id)).toThrow(ConflictError);
   });
 });

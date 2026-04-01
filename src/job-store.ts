@@ -51,7 +51,7 @@ export class InMemoryJobStore implements JobStore {
     const cutoff = new Date(Date.now() - ttlMs).toISOString();
     let count = 0;
     for (const [id, job] of this.jobs) {
-      if (job.updatedAt < cutoff && (job.status === 'completed' || job.status === 'failed')) {
+      if (job.updatedAt < cutoff && (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled')) {
         this.jobs.delete(id);
         count++;
       }
@@ -197,7 +197,7 @@ export class SqliteJobStore implements JobStore {
     this.stmtListRecent = this.db.prepare('SELECT * FROM jobs ORDER BY updated_at DESC LIMIT ?');
     this.stmtDelete = this.db.prepare('DELETE FROM jobs WHERE id = ?');
     this.stmtCleanup = this.db.prepare(
-      `DELETE FROM jobs WHERE updated_at < ? AND status IN ('completed', 'failed')`
+      `DELETE FROM jobs WHERE updated_at < ? AND status IN ('completed', 'failed', 'cancelled')`
     );
 
     // Auto-cleanup timer
