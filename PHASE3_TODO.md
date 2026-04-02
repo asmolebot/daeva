@@ -1,6 +1,6 @@
 # Phase 3 — Portable Pod Packages, Registry, and Client Layer
 
-This file is the working queue for the next major phase of `asmo-pod-orchestrator`.
+This file is the working queue for the next major phase of `daeva`.
 
 ## Goals
 
@@ -156,10 +156,10 @@ The package should describe:
   - Added `src/mcp-server.ts` with a stdio JSON-RPC 2.0 MCP server (no external deps).
   - Exposes 8 tools: `list_pods`, `list_aliases`, `list_installed`, `get_status`, `get_scheduler`,
     `enqueue_job`, `get_job`, `create_pod`. All proxy to the orchestrator HTTP API.
-  - Added `src/mcp-cli.ts` entry point; registered `asmo-pod-orchestrator-mcp` bin in `package.json`.
+  - Added `src/mcp-cli.ts` entry point; registered `daeva-mcp` bin in `package.json`.
   - Launch: `node dist/src/mcp-cli.js [--base-url http://127.0.0.1:8787]`
 - [x] Define client skill shape for OpenClaw
-  - Added `~/asmo/skills/asmo-pod-orchestrator/SKILL.md` with endpoint reference, curl examples,
+  - Added `~/asmo/skills/daeva/SKILL.md` with endpoint reference, curl examples,
     job type/capability table, MCP client config snippet, and troubleshooting guidance.
 - [x] Add install script for server host setup (with flags to skip Podman/service setup)
   - Added `scripts/install-server.sh` (chmod +x).
@@ -174,9 +174,9 @@ The package should describe:
     `--port`, `--data-dir`, `--install-dir`. Prereq checks and clear final start command output.
 - [x] Split sample pod packages into separate reusable repos
   - Added `examples/pod-package-repos/` with a plan README and stubs for three packages:
-    - `asmo-whisper-pod/` — speech-to-text (Whisper/faster-whisper)
-    - `asmo-comfyui-pod/` — image generation (ComfyUI)
-    - `asmo-vision-pod/` — vision + OCR (Ollama/llava or PaddleOCR)
+    - `daeva-whisper-pod/` — speech-to-text (Whisper/faster-whisper)
+    - `daeva-comfyui-pod/` — image generation (ComfyUI)
+    - `daeva-vision-pod/` — vision + OCR (Ollama/llava or PaddleOCR)
   - Each stub has a `pod-package.json` + `README.md` ready to become an independent repo.
   - Parent `README.md` documents how the registry index should be updated when repos go live.
 

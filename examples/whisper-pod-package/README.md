@@ -1,4 +1,4 @@
-# asmo-whisper pod package
+# daeva-whisper pod package
 
 Example portable pod package for documentation and schema validation.
 

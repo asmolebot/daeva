@@ -1,6 +1,6 @@
 # Pod Package Repos — Split Plan
 
-This directory describes how the sample pod packages shipped with `asmo-pod-orchestrator`
+This directory describes how the sample pod packages shipped with `daeva`
 should be split into separate, independently publishable repositories.
 
 Each repo is a self-contained `asmo` pod package: a `pod-package.json` manifest, a `README.md`,
@@ -10,18 +10,18 @@ optional Dockerfile/scripts/quadlet files, and no dependency on the orchestrator
 
 ## Planned Repositories
 
-### 1. `asmo-whisper-pod` — Speech-to-text (Whisper)
+### 1. `daeva-whisper-pod` — Speech-to-text (Whisper)
 
-**Suggested repo:** `github.com/your-org/asmo-whisper-pod`  
+**Suggested repo:** `github.com/your-org/daeva-whisper-pod`  
 **Based on:** `examples/whisper-pod-package/`  
-**Status:** Stub — see `asmo-whisper-pod/` in this directory.
+**Status:** Stub — see `daeva-whisper-pod/` in this directory.
 
 **Contents:**
 ```
-asmo-whisper-pod/
+daeva-whisper-pod/
   pod-package.json          # canonical package manifest (schemaVersion: "1")
   README.md                 # install/usage instructions
-  Dockerfile                # builds docker.io/library/asmo-whisper image
+  Dockerfile                # builds docker.io/library/daeva-whisper image
   scripts/
     install.sh              # podman pull + directory setup
     start.sh                # podman run (or quadlet start)
@@ -35,14 +35,14 @@ asmo-whisper-pod/
 
 ---
 
-### 2. `asmo-comfyui-pod` — Image generation (ComfyUI)
+### 2. `daeva-comfyui-pod` — Image generation (ComfyUI)
 
-**Suggested repo:** `github.com/your-org/asmo-comfyui-pod`  
-**Status:** Stub — see `asmo-comfyui-pod/` in this directory.
+**Suggested repo:** `github.com/your-org/daeva-comfyui-pod`  
+**Status:** Stub — see `daeva-comfyui-pod/` in this directory.
 
 **Contents:**
 ```
-asmo-comfyui-pod/
+daeva-comfyui-pod/
   pod-package.json
   README.md
   Dockerfile                # or reference to official ComfyUI image
@@ -59,14 +59,14 @@ asmo-comfyui-pod/
 
 ---
 
-### 3. `asmo-vision-pod` — Vision / OCR (e.g. Ollama + llava, or paddleOCR)
+### 3. `daeva-vision-pod` — Vision / OCR (e.g. Ollama + llava, or paddleOCR)
 
-**Suggested repo:** `github.com/your-org/asmo-vision-pod`  
-**Status:** Stub — see `asmo-vision-pod/` in this directory.
+**Suggested repo:** `github.com/your-org/daeva-vision-pod`  
+**Status:** Stub — see `daeva-vision-pod/` in this directory.
 
 **Contents:**
 ```
-asmo-vision-pod/
+daeva-vision-pod/
   pod-package.json
   README.md
   scripts/
@@ -92,7 +92,7 @@ curl -X POST http://localhost:8787/pods/create -d '{"alias":"whisper"}'
 ```
 
 The orchestrator:
-1. Resolves `whisper` alias → `GithubRepoRegistrySource { repo: "your-org/asmo-whisper-pod" }`
+1. Resolves `whisper` alias → `GithubRepoRegistrySource { repo: "your-org/daeva-whisper-pod" }`
 2. Clones the repo into `.data/pod-packages/whisper/`
 3. Validates `pod-package.json`
 4. Runs install hooks (podman pull, dir creation, etc.)
@@ -108,10 +108,10 @@ Update `src/manifests/local-registry-index.json` entries to point at real repos:
 ```json
 {
   "alias": "whisper",
-  "packageName": "asmo-whisper-pod",
+  "packageName": "daeva-whisper-pod",
   "source": {
     "kind": "github-repo",
-    "repo": "your-org/asmo-whisper-pod",
+    "repo": "your-org/daeva-whisper-pod",
     "ref": "main",
     "packageManifestPath": "pod-package.json"
   }
@@ -123,6 +123,6 @@ Update `src/manifests/local-registry-index.json` entries to point at real repos:
 ## Stub Directories
 
 See sibling directories for per-package stubs:
-- [`asmo-whisper-pod/`](./asmo-whisper-pod/) — Whisper package stub
-- [`asmo-comfyui-pod/`](./asmo-comfyui-pod/) — ComfyUI package stub
-- [`asmo-vision-pod/`](./asmo-vision-pod/) — Vision/OCR package stub
+- [`daeva-whisper-pod/`](./daeva-whisper-pod/) — Whisper package stub
+- [`daeva-comfyui-pod/`](./daeva-comfyui-pod/) — ComfyUI package stub
+- [`daeva-vision-pod/`](./daeva-vision-pod/) — Vision/OCR package stub

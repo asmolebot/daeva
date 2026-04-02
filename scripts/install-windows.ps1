@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Install asmo-pod-orchestrator on Windows.
+    Install daeva on Windows.
 
 .DESCRIPTION
     Installs Node.js (via winget or choco), optional Podman Desktop, and
@@ -21,13 +21,13 @@
     Suppress all prompts; use defaults.
 
 .PARAMETER InstallDir
-    Installation directory. Default: $env:LOCALAPPDATA\asmo-pod-orchestrator
+    Installation directory. Default: $env:LOCALAPPDATA\daeva
 
 .PARAMETER Port
     HTTP port for the orchestrator. Default: 8787
 
 .PARAMETER DataDir
-    Data directory. Default: $env:APPDATA\asmo-pod-orchestrator
+    Data directory. Default: $env:APPDATA\daeva
 
 .EXAMPLE
     .\install-windows.ps1
@@ -41,15 +41,15 @@ param(
     [switch]$SkipService,
     [switch]$DryRun,
     [switch]$NonInteractive,
-    [string]$InstallDir  = "$env:LOCALAPPDATA\asmo-pod-orchestrator",
+    [string]$InstallDir  = "$env:LOCALAPPDATA\daeva",
     [int]   $Port        = 8787,
-    [string]$DataDir     = "$env:APPDATA\asmo-pod-orchestrator"
+    [string]$DataDir     = "$env:APPDATA\daeva"
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$ServiceName  = 'asmo-pod-orchestrator'
+$ServiceName  = 'daeva'
 $NodeVersionRequired = 20
 
 # ---------------------------------------------------------------------------
@@ -156,27 +156,27 @@ if (-not $SkipPodman) {
 }
 
 # ---------------------------------------------------------------------------
-# Install asmo-pod-orchestrator
+# Install daeva
 # ---------------------------------------------------------------------------
-Write-Info "Installing asmo-pod-orchestrator to $InstallDir..."
+Write-Info "Installing daeva to $InstallDir..."
 Invoke-Step "New-Item -ItemType Directory -Force -Path '$InstallDir' | Out-Null"
 Invoke-Step "New-Item -ItemType Directory -Force -Path '$DataDir'    | Out-Null"
 Invoke-Step "New-Item -ItemType Directory -Force -Path '$DataDir\logs' | Out-Null"
 
 $localPkg = Join-Path (Get-Location) 'package.json'
-if ((Test-Path $localPkg) -and ((Get-Content $localPkg -Raw) -match '"asmo-pod-orchestrator"')) {
+if ((Test-Path $localPkg) -and ((Get-Content $localPkg -Raw) -match '"daeva"')) {
     Write-Info "Installing from local source tree..."
     Invoke-Step "npm install --prefix '$InstallDir' --production"
     Invoke-Step "Copy-Item -Recurse -Force . '$InstallDir\'"
 } else {
     Write-Info "Installing from npm..."
-    Invoke-Step "npm install -g asmo-pod-orchestrator"
+    Invoke-Step "npm install -g daeva"
 }
 
 # Resolve binary path
-$BinPath = (Get-Command 'asmo-pod-orchestrator' -ErrorAction SilentlyContinue)?.Source
+$BinPath = (Get-Command 'daeva' -ErrorAction SilentlyContinue)?.Source
 if (-not $BinPath) {
-    $BinPath = Join-Path $InstallDir 'node_modules\.bin\asmo-pod-orchestrator.cmd'
+    $BinPath = Join-Path $InstallDir 'node_modules\.bin\daeva.cmd'
 }
 
 # Write .env

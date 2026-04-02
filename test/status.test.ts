@@ -43,9 +43,9 @@ describe('runtime status inspection', () => {
     });
     expect(status.summary.observedContainers).toBe(0);
     expect(whisper?.container).toEqual({
-      declaredName: 'asmo-whisper',
-      name: 'asmo-whisper',
-      names: ['asmo-whisper'],
+      declaredName: 'daeva-whisper',
+      name: 'daeva-whisper',
+      names: ['daeva-whisper'],
       image: null,
       state: null,
       status: null,

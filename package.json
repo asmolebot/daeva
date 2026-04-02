@@ -1,17 +1,28 @@
 {
-  "name": "asmo-pod-orchestrator",
+  "name": "daeva",
   "version": "0.1.0",
-  "description": "First-pass local pod orchestrator for GPU-backed services like ComfyUI, Whisper, and OCR/Vision.",
+  "description": "Daeva — local GPU pod orchestrator for AI workloads",
   "type": "module",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
   "bin": {
-    "asmo-pod-orchestrator": "dist/src/cli.js",
-    "asmo-pod-orchestrator-mcp": "dist/src/mcp-cli.js"
+    "daeva": "dist/src/cli.js",
+    "daeva-mcp": "dist/src/mcp-cli.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openclaw/daeva.git"
+  },
+  "homepage": "https://asmo.bot",
+  "bugs": {
+    "url": "https://github.com/openclaw/daeva/issues"
   },
   "files": [
-    "dist",
-    "README.md"
+    "dist/src",
+    "dist/examples",
+    "dist/manifests",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -22,8 +33,12 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "keywords": [
+    "daeva",
     "orchestrator",
     "gpu",
+    "pod",
+    "ai",
+    "mcp",
     "fastify",
     "queue",
     "comfyui",

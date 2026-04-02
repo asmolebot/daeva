@@ -1,8 +1,8 @@
-# asmo-vision-pod
+# daeva-vision-pod
 
 > **Pod package stub** — to be published as a separate repo.
 
-Portable pod package for local vision and OCR inference managed by `asmo-pod-orchestrator`.
+Portable pod package for local vision and OCR inference managed by `daeva`.
 Backed by [Ollama](https://github.com/ollama/ollama) with a vision-capable model (e.g. `llava`)
 or a dedicated OCR engine (e.g. PaddleOCR).
 
@@ -42,11 +42,11 @@ curl -X POST http://localhost:8787/pods/create \
 ```bash
 cp deploy/vision.container ~/.config/containers/systemd/
 systemctl --user daemon-reload
-systemctl --user start asmo-vision
+systemctl --user start daeva-vision
 ```
 
 ## See also
 
-- [asmo-pod-orchestrator](https://github.com/your-org/asmo-pod-orchestrator)
+- [daeva](https://github.com/your-org/daeva)
 - [Ollama](https://github.com/ollama/ollama)
 - [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)

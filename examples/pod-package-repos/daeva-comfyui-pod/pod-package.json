@@ -1,9 +1,9 @@
 {
   "schemaVersion": "1",
   "packageType": "pod-package",
-  "name": "asmo-comfyui-pod",
+  "name": "daeva-comfyui-pod",
   "version": "0.1.0",
-  "description": "Portable pod package for ComfyUI image generation via asmo-pod-orchestrator.",
+  "description": "Portable pod package for ComfyUI image generation via daeva.",
   "pod": {
     "id": "comfyui",
     "nickname": "ComfyUI",
@@ -12,7 +12,7 @@
     "capabilities": ["image-generation"],
     "source": {
       "homepage": "https://github.com/comfyanonymous/ComfyUI",
-      "repository": "https://github.com/your-org/asmo-comfyui-pod"
+      "repository": "https://github.com/your-org/daeva-comfyui-pod"
     },
     "runtime": {
       "kind": "http-service",
@@ -44,20 +44,20 @@
   "install": { "strategy": "prebuilt-image" },
   "service": {
     "installMode": "quadlet",
-    "serviceName": "asmo-comfyui",
+    "serviceName": "daeva-comfyui",
     "quadlet": {
-      "image": "docker.io/library/asmo-comfyui:latest",
+      "image": "docker.io/library/daeva-comfyui:latest",
       "publishPort": ["8188:8188"],
       "volume": [
         "${HOME}/ai/services/comfy/models:/models",
         "${HOME}/ai/services/comfy/output:/output"
       ],
       "device": ["nvidia.com/gpu=all"],
-      "containerName": "asmo-comfyui"
+      "containerName": "daeva-comfyui"
     },
     "systemd": { "after": ["network-online.target"], "wantedBy": ["default.target"], "restart": "on-failure", "timeoutStartSec": 120 }
   },
   "source": {
-    "repository": "https://github.com/your-org/asmo-comfyui-pod"
+    "repository": "https://github.com/your-org/daeva-comfyui-pod"
   }
 }

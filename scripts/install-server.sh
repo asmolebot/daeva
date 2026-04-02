@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install-server.sh — Set up asmo-pod-orchestrator on a server host.
+# install-server.sh — Set up daeva on a server host.
 #
 # Usage:
 #   ./scripts/install-server.sh [OPTIONS]
@@ -8,10 +8,10 @@
 #   --skip-podman        Skip Podman install/setup steps
 #   --skip-service       Skip systemd/quadlet service installation
 #   --skip-node-check    Skip Node.js version check
-#   --data-dir DIR       Override orchestrator .data directory (default: ~/.local/share/asmo-pod-orchestrator)
+#   --data-dir DIR       Override orchestrator .data directory (default: ~/.local/share/daeva)
 #   --port PORT          HTTP port to listen on (default: 8787)
 #   --user USER          System user to run the service as (default: current user)
-#   --install-dir DIR    Directory to install orchestrator into (default: ~/asmo-pod-orchestrator)
+#   --install-dir DIR    Directory to install orchestrator into (default: ~/daeva)
 #   --dry-run            Print steps without executing them
 #   --help               Show this help message
 #
@@ -29,10 +29,10 @@ SKIP_PODMAN=false
 SKIP_SERVICE=false
 SKIP_NODE_CHECK=false
 DRY_RUN=false
-DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/asmo-pod-orchestrator"
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/daeva"
 PORT="8787"
 SERVICE_USER="${USER:-$(id -un)}"
-INSTALL_DIR="$HOME/asmo-pod-orchestrator"
+INSTALL_DIR="$HOME/daeva"
 
 # ---------------------------------------------------------------------------
 # Arg parsing
@@ -77,7 +77,7 @@ run() {
 # ---------------------------------------------------------------------------
 # Banner
 # ---------------------------------------------------------------------------
-log "asmo-pod-orchestrator server installer"
+log "daeva server installer"
 log "  install-dir : $INSTALL_DIR"
 log "  data-dir    : $DATA_DIR"
 log "  port        : $PORT"
@@ -155,7 +155,7 @@ if [[ -f "$PROJ_ROOT/package.json" ]]; then
 else
   # Running from a release archive or npm global install — assume npm is enough
   log "  Installing from npm..."
-  run npm install -g asmo-pod-orchestrator
+  run npm install -g daeva
 fi
 
 # ---------------------------------------------------------------------------
@@ -172,7 +172,7 @@ log "Writing environment file: $ENV_FILE"
 if [[ "$DRY_RUN" == "false" ]]; then
   if [[ ! -f "$ENV_FILE" ]]; then
     cat > "$ENV_FILE" <<EOF
-# asmo-pod-orchestrator environment
+# daeva environment
 PORT=$PORT
 HOST=127.0.0.1
 DATA_DIR=$DATA_DIR
@@ -190,12 +190,12 @@ fi
 # ---------------------------------------------------------------------------
 if [[ "$SKIP_SERVICE" == "false" ]]; then
   SERVICE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
-  SERVICE_FILE="$SERVICE_DIR/asmo-pod-orchestrator.service"
+  SERVICE_FILE="$SERVICE_DIR/daeva.service"
   log "Installing systemd user service: $SERVICE_FILE"
 
   # Resolve the binary
-  if command -v asmo-pod-orchestrator &>/dev/null; then
-    BIN_PATH="$(command -v asmo-pod-orchestrator)"
+  if command -v daeva &>/dev/null; then
+    BIN_PATH="$(command -v daeva)"
   else
     BIN_PATH="node $INSTALL_DIR/dist/src/cli.js"
   fi
@@ -204,7 +204,7 @@ if [[ "$SKIP_SERVICE" == "false" ]]; then
   if [[ "$DRY_RUN" == "false" ]]; then
     cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=asmo-pod-orchestrator HTTP service
+Description=daeva HTTP service
 After=network.target
 
 [Service]
@@ -223,10 +223,10 @@ EOF
     log "  Reloading systemd user daemon..."
     systemctl --user daemon-reload 2>/dev/null || warn "systemctl --user daemon-reload failed"
     log "  Enabling service..."
-    systemctl --user enable asmo-pod-orchestrator 2>/dev/null || warn "systemctl --user enable failed"
+    systemctl --user enable daeva 2>/dev/null || warn "systemctl --user enable failed"
     log ""
-    log "  To start now:   systemctl --user start asmo-pod-orchestrator"
-    log "  To view logs:   journalctl --user -fu asmo-pod-orchestrator"
+    log "  To start now:   systemctl --user start daeva"
+    log "  To view logs:   journalctl --user -fu daeva"
   else
     echo "[dry-run] write $SERVICE_FILE and reload systemd"
   fi

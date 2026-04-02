@@ -78,7 +78,7 @@ describe('create flow planning', () => {
       throw new Error('Expected installed materialization');
     }
 
-    expect(result.materialization.installedPackage.packageName).toBe('asmo-whisper');
+    expect(result.materialization.installedPackage.packageName).toBe('daeva-whisper');
     expect(installedPackageStore.list()).toHaveLength(1);
     expect(installedPackageStore.list()[0].manifest.pod.id).toBe('whisper');
   });
@@ -116,7 +116,7 @@ describe('create flow planning', () => {
     expect(result.materialization.installedPackage.alias).toBe('git-whisper');
     expect(result.materialization.installedPackage.source.kind).toBe('git-repo');
     expect(result.materialization.installedPackage.materializedPath).toContain('git-materialized');
-    expect(readFileSync(result.materialization.installedPackage.packageManifestPath, 'utf8')).toContain('asmo-whisper');
+    expect(readFileSync(result.materialization.installedPackage.packageManifestPath, 'utf8')).toContain('daeva-whisper');
     expect(installedPackageStore.list()).toHaveLength(1);
   });
 
@@ -154,7 +154,7 @@ describe('create flow planning', () => {
     expect(result.materialization.installedPackage.alias).toBe('archive-whisper');
     expect(result.materialization.installedPackage.source.kind).toBe('uploaded-archive');
     expect(result.materialization.installedPackage.materializedPath).toContain('archive-materialized');
-    expect(readFileSync(result.materialization.installedPackage.packageManifestPath, 'utf8')).toContain('asmo-whisper');
+    expect(readFileSync(result.materialization.installedPackage.packageManifestPath, 'utf8')).toContain('daeva-whisper');
     expect(installedPackageStore.list()).toHaveLength(1);
   });
 

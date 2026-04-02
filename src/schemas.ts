@@ -267,7 +267,7 @@ export const podPackageManifestSchema = z.object({
      * All path/volume values support template variables (${HOME}, ${PACKAGE_DIR}, …).
      */
     quadlet: z.object({
-      /** Container image reference (e.g. "docker.io/library/asmo-whisper:latest"). */
+      /** Container image reference (e.g. "docker.io/library/daeva-whisper:latest"). */
       image: z.string().min(1).optional(),
       /** Port publish specs, each in the form "hostPort:containerPort[/proto]". */
       publishPort: z.array(z.string().min(1)).optional(),

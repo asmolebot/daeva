@@ -57,11 +57,11 @@ const fakeRuntimeInspector: RuntimeInspector = {
   inspect(manifests) {
     const containersByName = new Map([
       [
-        'asmo-whisper',
+        'daeva-whisper',
         {
-          name: 'asmo-whisper',
-          names: ['asmo-whisper'],
-          image: 'docker.io/library/asmo-whisper:latest',
+          name: 'daeva-whisper',
+          names: ['daeva-whisper'],
+          image: 'docker.io/library/daeva-whisper:latest',
           state: 'running',
           status: 'Up 5 minutes',
           ports: [
@@ -190,7 +190,7 @@ describe('HTTP API', () => {
 
     expect(body.create.alias).toBe('whisper');
     expect(body.create.materialization.status).toBe('installed');
-    expect(body.create.materialization.installedPackage.packageName).toBe('asmo-whisper');
+    expect(body.create.materialization.installedPackage.packageName).toBe('daeva-whisper');
     expect(body.create.materialization.installedPackage.materializedPath).toContain('materialized');
     expect(body.links.installed).toBe('/pods/installed');
 
@@ -203,7 +203,7 @@ describe('HTTP API', () => {
 
     const persisted = JSON.parse(readFileSync(storageFilePath, 'utf8'));
     expect(persisted.packages).toHaveLength(1);
-    expect(persisted.packages[0].packageName).toBe('asmo-whisper');
+    expect(persisted.packages[0].packageName).toBe('daeva-whisper');
   });
 
   it('materializes a direct git-repo source through POST /pods/create and exposes installed metadata', async () => {
@@ -368,10 +368,10 @@ describe('HTTP API', () => {
     expect(body.runtime.summary.totalPods).toBe(3);
     expect(body.runtime.summary.observedContainers).toBe(1);
     expect(body.runtime.pods.find((pod: { podId: string }) => pod.podId === 'whisper').container).toEqual({
-      declaredName: 'asmo-whisper',
-      name: 'asmo-whisper',
-      names: ['asmo-whisper'],
-      image: 'docker.io/library/asmo-whisper:latest',
+      declaredName: 'daeva-whisper',
+      name: 'daeva-whisper',
+      names: ['daeva-whisper'],
+      image: 'docker.io/library/daeva-whisper:latest',
       state: 'running',
       status: 'Up 5 minutes',
       ports: [

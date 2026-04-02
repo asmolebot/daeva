@@ -52,11 +52,11 @@ export const builtinManifests: PodManifest[] = [
       method: 'POST'
     },
     startup: {
-      command: `sh -lc 'podman container exists asmo-whisper && podman start asmo-whisper || podman run -d --name asmo-whisper --replace --device nvidia.com/gpu=all -p 8001:8001 -e WHISPER_MODEL=large-v3-turbo -e WHISPER_COMPUTE_TYPE=float16 -e WHISPER_DEVICE=cuda -v /home/clohl/ai/services/whisper/models:/models docker.io/library/asmo-whisper:latest'`,
+      command: `sh -lc 'podman container exists daeva-whisper && podman start daeva-whisper || podman run -d --name daeva-whisper --replace --device nvidia.com/gpu=all -p 8001:8001 -e WHISPER_MODEL=large-v3-turbo -e WHISPER_COMPUTE_TYPE=float16 -e WHISPER_DEVICE=cuda -v /home/clohl/ai/services/whisper/models:/models docker.io/library/daeva-whisper:latest'`,
       simulatedDelayMs: 200
     },
     shutdown: {
-      command: 'podman stop asmo-whisper',
+      command: 'podman stop daeva-whisper',
       simulatedDelayMs: 100
     },
     exclusivityGroup: 'gpu-0',

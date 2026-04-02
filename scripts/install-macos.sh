@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install-macos.sh — Install asmo-pod-orchestrator on macOS
+# install-macos.sh — Install daeva on macOS
 #
 # Requires: Homebrew (installs if absent)
 # Flags:
@@ -8,9 +8,9 @@
 #   --dry-run         Print commands without executing them
 #   --help            Show usage
 #   --non-interactive Suppress prompts; use defaults
-#   --install-dir DIR Install directory (default: ~/Library/Application Support/asmo-pod-orchestrator)
+#   --install-dir DIR Install directory (default: ~/Library/Application Support/daeva)
 #   --port PORT       HTTP port for the service (default: 8787)
-#   --data-dir DIR    Data directory (default: ~/Library/Application Support/asmo-pod-orchestrator/data)
+#   --data-dir DIR    Data directory (default: ~/Library/Application Support/daeva/data)
 #
 # Usage examples:
 #   ./install-macos.sh
@@ -25,10 +25,10 @@ SKIP_SERVICE=false
 DRY_RUN=false
 NON_INTERACTIVE=false
 APP_SUPPORT="${HOME}/Library/Application Support"
-INSTALL_DIR="${APP_SUPPORT}/asmo-pod-orchestrator"
-DATA_DIR="${APP_SUPPORT}/asmo-pod-orchestrator/data"
+INSTALL_DIR="${APP_SUPPORT}/daeva"
+DATA_DIR="${APP_SUPPORT}/daeva/data"
 PORT=8787
-LAUNCHD_LABEL="ai.asmo.pod-orchestrator"
+LAUNCHD_LABEL="ai.asmo.daeva"
 NODE_VERSION_REQUIRED=20
 
 # ---------------------------------------------------------------------------
@@ -140,19 +140,19 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Install asmo-pod-orchestrator
+# Install daeva
 # ---------------------------------------------------------------------------
-info "Installing asmo-pod-orchestrator..."
+info "Installing daeva..."
 run "mkdir -p '${INSTALL_DIR}'"
 run "mkdir -p '${DATA_DIR}'"
 
-if [[ -f "$(pwd)/package.json" ]] && grep -q '"asmo-pod-orchestrator"' "$(pwd)/package.json" 2>/dev/null; then
+if [[ -f "$(pwd)/package.json" ]] && grep -q '"daeva"' "$(pwd)/package.json" 2>/dev/null; then
   info "Installing from local source tree..."
   run "npm install --prefix '${INSTALL_DIR}' --production"
   run "cp -r . '${INSTALL_DIR}/'"
 else
   info "Installing from npm..."
-  run "npm install -g asmo-pod-orchestrator"
+  run "npm install -g daeva"
 fi
 
 # Write .env
@@ -172,7 +172,7 @@ if [[ "${SKIP_SERVICE}" == "false" ]]; then
   LAUNCH_AGENTS_DIR="${HOME}/Library/LaunchAgents"
   PLIST_FILE="${LAUNCH_AGENTS_DIR}/${LAUNCHD_LABEL}.plist"
 
-  EXEC_PATH="$(command -v asmo-pod-orchestrator 2>/dev/null || echo "${INSTALL_DIR}/node_modules/.bin/asmo-pod-orchestrator")"
+  EXEC_PATH="$(command -v daeva 2>/dev/null || echo "${INSTALL_DIR}/node_modules/.bin/daeva")"
 
   info "Writing launchd plist to ${PLIST_FILE}..."
   run "mkdir -p '${LAUNCH_AGENTS_DIR}'"
@@ -233,7 +233,7 @@ else
   info "Skipping service setup (--skip-service)"
   echo ""
   echo -e "${GREEN}Start manually with:${NC}"
-  echo "  asmo-pod-orchestrator --port ${PORT} --data-dir '${DATA_DIR}'"
+  echo "  daeva --port ${PORT} --data-dir '${DATA_DIR}'"
 fi
 
 echo ""

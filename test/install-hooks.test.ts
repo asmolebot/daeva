@@ -28,7 +28,7 @@ describe('describeInstallHooks', () => {
     const steps = describeInstallHooks(manifest, '/opt/test-package');
     const pullStep = steps.find((s) => s.includes('podman pull'));
     expect(pullStep).toBeDefined();
-    expect(pullStep).toContain('asmo-whisper');
+    expect(pullStep).toContain('daeva-whisper');
   });
 
   it('substitutes HOME in directory paths', () => {
@@ -158,11 +158,11 @@ describe('service/quadlet metadata on PodPackageManifest', () => {
   it('parses the whisper example quadlet metadata', () => {
     const parsed = parsePodPackageManifest(examplePodPackage);
     expect(parsed.service?.installMode).toBe('quadlet');
-    expect(parsed.service?.serviceName).toBe('asmo-whisper');
-    expect(parsed.service?.quadlet?.image).toBe('docker.io/library/asmo-whisper:latest');
+    expect(parsed.service?.serviceName).toBe('daeva-whisper');
+    expect(parsed.service?.quadlet?.image).toBe('docker.io/library/daeva-whisper:latest');
     expect(parsed.service?.quadlet?.publishPort).toEqual(['8001:8001']);
     expect(parsed.service?.quadlet?.volume?.length).toBeGreaterThan(0);
-    expect(parsed.service?.quadlet?.containerName).toBe('asmo-whisper');
+    expect(parsed.service?.quadlet?.containerName).toBe('daeva-whisper');
     expect(parsed.service?.systemd?.restart).toBe('on-failure');
     expect(parsed.service?.systemd?.timeoutStartSec).toBe(120);
     expect(parsed.service?.systemd?.wantedBy).toContain('default.target');

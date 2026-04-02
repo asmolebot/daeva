@@ -1,9 +1,9 @@
 {
   "schemaVersion": "1",
   "packageType": "pod-package",
-  "name": "asmo-whisper-pod",
+  "name": "daeva-whisper-pod",
   "version": "0.1.0",
-  "description": "Portable pod package for local Whisper speech-to-text via asmo-pod-orchestrator.",
+  "description": "Portable pod package for local Whisper speech-to-text via daeva.",
   "pod": {
     "id": "whisper",
     "nickname": "Whisper",
@@ -12,7 +12,7 @@
     "capabilities": ["speech-to-text"],
     "source": {
       "homepage": "https://github.com/openai/whisper",
-      "repository": "https://github.com/your-org/asmo-whisper-pod"
+      "repository": "https://github.com/your-org/daeva-whisper-pod"
     },
     "runtime": {
       "kind": "http-service",
@@ -45,18 +45,18 @@
   "install": { "strategy": "prebuilt-image" },
   "service": {
     "installMode": "quadlet",
-    "serviceName": "asmo-whisper",
+    "serviceName": "daeva-whisper",
     "quadlet": {
-      "image": "docker.io/library/asmo-whisper:latest",
+      "image": "docker.io/library/daeva-whisper:latest",
       "publishPort": ["8001:8001"],
       "volume": ["${HOME}/ai/services/whisper/models:/models"],
       "environment": ["WHISPER_MODEL=large-v3-turbo", "WHISPER_DEVICE=cuda"],
       "device": ["nvidia.com/gpu=all"],
-      "containerName": "asmo-whisper"
+      "containerName": "daeva-whisper"
     },
     "systemd": { "after": ["network-online.target"], "wantedBy": ["default.target"], "restart": "on-failure" }
   },
   "source": {
-    "repository": "https://github.com/your-org/asmo-whisper-pod"
+    "repository": "https://github.com/your-org/daeva-whisper-pod"
   }
 }

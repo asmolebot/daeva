@@ -1,12 +1,12 @@
 {
   "schemaVersion": "1",
   "indexType": "pod-registry-index",
-  "name": "asmo-local-sample-index",
+  "name": "daeva-local-sample-index",
   "description": "Local sample registry index for built-in and community pod aliases.",
   "entries": [
     {
       "alias": "whisper",
-      "packageName": "asmo-whisper",
+      "packageName": "daeva-whisper",
       "podId": "whisper",
       "description": "Built-in local Whisper portable package example.",
       "capabilities": ["speech-to-text"],

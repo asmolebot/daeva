@@ -1,6 +1,6 @@
-# Podman Quadlet unit file for asmo-whisper.
+# Podman Quadlet unit file for daeva-whisper.
 # Drop this into ~/.config/containers/systemd/ (user) or /etc/containers/systemd/ (system).
-# Run `systemctl --user daemon-reload` then `systemctl --user start asmo-whisper`.
+# Run `systemctl --user daemon-reload` then `systemctl --user start daeva-whisper`.
 #
 # Template variables like %h (home dir) are native Quadlet/systemd specifiers.
 # Package-level variables (${HOME}, ${PACKAGE_DIR}) are expanded by the
@@ -11,8 +11,8 @@ Description=Asmo Whisper speech-to-text pod
 After=network-online.target
 
 [Container]
-Image=docker.io/library/asmo-whisper:latest
-ContainerName=asmo-whisper
+Image=docker.io/library/daeva-whisper:latest
+ContainerName=daeva-whisper
 PublishPort=8001:8001
 Volume=%h/ai/services/whisper/models:/models
 Environment=WHISPER_MODEL=large-v3-turbo

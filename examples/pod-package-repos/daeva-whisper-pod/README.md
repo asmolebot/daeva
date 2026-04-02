@@ -1,9 +1,9 @@
-# asmo-whisper-pod
+# daeva-whisper-pod
 
 > **Pod package stub** — to be published as a separate repo.
 
 Portable pod package for running [Whisper](https://github.com/openai/whisper) (or
-`faster-whisper`) as a local speech-to-text HTTP service managed by `asmo-pod-orchestrator`.
+`faster-whisper`) as a local speech-to-text HTTP service managed by `daeva`.
 
 ## Install via orchestrator
 
@@ -16,8 +16,8 @@ curl -X POST http://localhost:8787/pods/create \
 ## Manual install
 
 ```bash
-git clone https://github.com/your-org/asmo-whisper-pod
-cd asmo-whisper-pod
+git clone https://github.com/your-org/daeva-whisper-pod
+cd daeva-whisper-pod
 ./scripts/install.sh
 ```
 
@@ -50,5 +50,5 @@ systemctl --user start whisper
 
 ## See also
 
-- [asmo-pod-orchestrator](https://github.com/your-org/asmo-pod-orchestrator)
+- [daeva](https://github.com/your-org/daeva)
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper)

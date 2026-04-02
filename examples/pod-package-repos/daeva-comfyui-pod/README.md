@@ -1,9 +1,9 @@
-# asmo-comfyui-pod
+# daeva-comfyui-pod
 
 > **Pod package stub** — to be published as a separate repo.
 
 Portable pod package for running [ComfyUI](https://github.com/comfyanonymous/ComfyUI) as a
-local image-generation HTTP service managed by `asmo-pod-orchestrator`.
+local image-generation HTTP service managed by `daeva`.
 
 ## Install via orchestrator
 
@@ -41,5 +41,5 @@ systemctl --user start comfyui
 
 ## See also
 
-- [asmo-pod-orchestrator](https://github.com/your-org/asmo-pod-orchestrator)
+- [daeva](https://github.com/your-org/daeva)
 - [ComfyUI](https://github.com/comfyanonymous/ComfyUI)

@@ -19,7 +19,7 @@ const start = async () => {
 
   try {
     await app.listen({ port, host });
-    console.log(`asmo-pod-orchestrator listening on http://${host}:${port}`);
+    console.log(`daeva listening on http://${host}:${port}`);
   } catch (error) {
     app.log.error(error);
     process.exit(1);

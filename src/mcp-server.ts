@@ -267,7 +267,7 @@ async function handleRequest(baseUrl: string, req: JsonRpcRequest): Promise<Json
       id,
       result: {
         protocolVersion: MCP_VERSION,
-        serverInfo: { name: 'asmo-pod-orchestrator-mcp', version: '0.1.0' },
+        serverInfo: { name: 'daeva-mcp', version: '0.1.0' },
         capabilities: { tools: {} }
       }
     };

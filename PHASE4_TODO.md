@@ -1,6 +1,6 @@
 # Phase 4 — Production Hardening & Real Execution
 
-Goal: Make asmo-pod-orchestrator actually execute real workloads end-to-end, persist state, and be publishable to npm/ClaWHub.
+Goal: Make daeva actually execute real workloads end-to-end, persist state, and be publishable to npm/ClaWHub.
 
 ## Task List
 
@@ -113,7 +113,7 @@ Goal: Make asmo-pod-orchestrator actually execute real workloads end-to-end, per
 
 ## Notes
 
-- Target: publishable to npm as `asmo-pod-orchestrator` + ClaWHub as a skill
+- Target: publishable to npm as `daeva` + ClaWHub as a skill
 - First real test target: Hecate (they/them) running ComfyUI image generation via the orchestrator on razerblade
 - All tests must pass before each chunk is considered done
 - Check off items as completed; add implementation notes under tasks

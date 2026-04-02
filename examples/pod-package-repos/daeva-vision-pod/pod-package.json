@@ -1,9 +1,9 @@
 {
   "schemaVersion": "1",
   "packageType": "pod-package",
-  "name": "asmo-vision-pod",
+  "name": "daeva-vision-pod",
   "version": "0.1.0",
-  "description": "Portable pod package for local vision/OCR inference via asmo-pod-orchestrator.",
+  "description": "Portable pod package for local vision/OCR inference via daeva.",
   "pod": {
     "id": "vision",
     "nickname": "Vision",
@@ -12,7 +12,7 @@
     "capabilities": ["vision", "ocr"],
     "source": {
       "homepage": "https://github.com/ollama/ollama",
-      "repository": "https://github.com/your-org/asmo-vision-pod"
+      "repository": "https://github.com/your-org/daeva-vision-pod"
     },
     "runtime": {
       "kind": "http-service",
@@ -43,17 +43,17 @@
   "install": { "strategy": "prebuilt-image" },
   "service": {
     "installMode": "quadlet",
-    "serviceName": "asmo-vision",
+    "serviceName": "daeva-vision",
     "quadlet": {
-      "image": "docker.io/library/asmo-vision:latest",
+      "image": "docker.io/library/daeva-vision:latest",
       "publishPort": ["8002:8002"],
       "volume": ["${HOME}/ai/services/vision/models:/models"],
       "device": ["nvidia.com/gpu=all"],
-      "containerName": "asmo-vision"
+      "containerName": "daeva-vision"
     },
     "systemd": { "after": ["network-online.target"], "wantedBy": ["default.target"], "restart": "on-failure" }
   },
   "source": {
-    "repository": "https://github.com/your-org/asmo-vision-pod"
+    "repository": "https://github.com/your-org/daeva-vision-pod"
   }
 }
