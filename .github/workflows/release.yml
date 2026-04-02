@@ -33,3 +33,19 @@ jobs:
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Install ClaWHub CLI
+        run: npm i -g clawhub
+
+      - name: Publish skill to ClaWHub
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          clawhub skill publish ./skills/openclaw \
+            --slug daeva \
+            --name "Daeva" \
+            --version "$VERSION" \
+            --changelog "Release $GITHUB_REF_NAME" \
+            --tags latest \
+            --no-input
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
