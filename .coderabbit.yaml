@@ -1,0 +1,29 @@
+language: en-US
+
+reviews:
+  profile: chill        # assertive | chill — start chill, can dial up later
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+
+  path_instructions:
+    - path: "src/**"
+      instructions: |
+        This is a TypeScript Node.js GPU pod orchestrator. Focus on:
+        - Type safety and proper Zod schema usage
+        - Fastify route correctness and error handling
+        - Job lifecycle state machine correctness
+        - Security: auth bypass, path traversal, upload limits
+    - path: "test/**"
+      instructions: |
+        Vitest test suite. Flag missing edge cases, especially around
+        job state transitions, error paths, and lifecycle command failures.
+    - path: "scripts/**"
+      instructions: |
+        Shell scripts for install/release. Check for portability,
+        error handling (set -euo pipefail), and safe variable quoting.
+
+chat:
+  auto_reply: true
