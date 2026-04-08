@@ -1,5 +1,5 @@
 {
-  "name": "daeva",
+  "name": "@asmostans/daeva",
   "version": "0.2.0",
   "description": "Daeva — local GPU pod orchestrator for AI workloads",
   "type": "module",
@@ -62,5 +62,8 @@
     "tsx": "^4.19.3",
     "typescript": "^5.8.2",
     "vitest": "^3.0.8"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
