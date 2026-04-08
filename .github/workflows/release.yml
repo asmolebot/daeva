@@ -20,6 +20,8 @@ jobs:
       id-token: write
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
@@ -53,19 +55,28 @@ jobs:
           gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
           gh release create "$RELEASE_TAG" --generate-notes --title "$RELEASE_TAG"
 
-      - name: Publish to npm
-        if: ${{ secrets.NPM_TOKEN != '' }}
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Install ClaWHub CLI
-        if: ${{ secrets.CLAWHUB_TOKEN != '' }}
-        run: npm i -g clawhub
-
-      - name: Publish skill to ClaWHub
-        if: ${{ secrets.CLAWHUB_TOKEN != '' }}
+      - name: Publish to npm if token exists
         run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN not set, skipping npm publish"
+            exit 0
+          fi
+          npm publish --provenance --access public
+
+      - name: Install ClaWHub CLI if token exists
+        run: |
+          if [ -z "$CLAWHUB_TOKEN" ]; then
+            echo "CLAWHUB_TOKEN not set, skipping ClaWHub install"
+            exit 0
+          fi
+          npm i -g clawhub
+
+      - name: Publish skill to ClaWHub if token exists
+        run: |
+          if [ -z "$CLAWHUB_TOKEN" ]; then
+            echo "CLAWHUB_TOKEN not set, skipping ClaWHub publish"
+            exit 0
+          fi
           VERSION="${RELEASE_TAG#v}"
           clawhub skill publish ./skills/openclaw \
             --slug daeva \
@@ -74,5 +85,3 @@ jobs:
             --changelog "Release $RELEASE_TAG" \
             --tags latest \
             --no-input
-        env:
-          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
