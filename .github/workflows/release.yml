@@ -59,13 +59,14 @@ jobs:
       - name: Publish to npm via trusted publishing
         run: npm publish --provenance --access public
 
-      - name: Install ClaWHub CLI if token exists
+      - name: Install and authenticate ClaWHub CLI if token exists
         run: |
           if [ -z "$CLAWHUB_TOKEN" ]; then
-            echo "CLAWHUB_TOKEN not set, skipping ClaWHub install"
+            echo "CLAWHUB_TOKEN not set, skipping ClaWHub install/login"
             exit 0
           fi
           npm i -g clawhub
+          clawhub login --token "$CLAWHUB_TOKEN" --no-browser
 
       - name: Publish skill to ClaWHub if token exists
         run: |
