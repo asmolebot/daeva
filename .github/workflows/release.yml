@@ -25,7 +25,7 @@ jobs:
       CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
         with:
           ref: ${{ env.CHECKOUT_REF }}
 
@@ -37,7 +37,7 @@ jobs:
           esac
 
       - name: Use Node.js 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6.3.0
         with:
           node-version: 24
           cache: npm
