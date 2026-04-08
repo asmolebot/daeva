@@ -1,6 +1,6 @@
 {
   "name": "daeva",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Daeva — local GPU pod orchestrator for AI workloads",
   "type": "module",
   "main": "dist/src/index.js",
@@ -11,11 +11,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/openclaw/daeva.git"
+    "url": "git+https://github.com/asmolebot/daeva.git"
   },
   "homepage": "https://asmo.bot",
   "bugs": {
-    "url": "https://github.com/openclaw/daeva/issues"
+    "url": "https://github.com/asmolebot/daeva/issues"
   },
   "files": [
     "dist/src",

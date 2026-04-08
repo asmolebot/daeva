@@ -10,6 +10,7 @@ import rateLimit from '@fastify/rate-limit';
 import { authPlugin, type AuthPluginOptions } from './auth.js';
 import { createFromAlias } from './create-flow.js';
 import { AppError, NotFoundError } from './errors.js';
+import { registerProxyHandler } from './proxy-handler.js';
 import { InstalledPackageStore } from './installed-package-store.js';
 import { JobManager } from './job-manager.js';
 import { PodController } from './pod-controller.js';
@@ -68,6 +69,9 @@ export const buildApp = async (dependencies: AppDependencies = {}) => {
     max: rlMax,
     timeWindow: rlWindowMs
   });
+
+  // Proxy mode — transparent HTTP/WS proxy to pod services
+  registerProxyHandler(app, { registry, podController });
 
   app.get('/health', async () => ({ ok: true }));
 

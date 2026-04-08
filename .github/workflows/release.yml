@@ -7,11 +7,11 @@ on:
 
 jobs:
   release:
-    name: Publish to npm
+    name: Publish release assets
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      id-token: write  # for npm provenance
+      contents: write
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -29,15 +29,23 @@ jobs:
       - name: Release checks (typecheck + build + test + pack dry-run)
         run: bash scripts/release-check.sh
 
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+
       - name: Publish to npm
+        if: ${{ secrets.NPM_TOKEN != '' }}
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Install ClaWHub CLI
+        if: ${{ secrets.CLAWHUB_TOKEN != '' }}
         run: npm i -g clawhub
 
       - name: Publish skill to ClaWHub
+        if: ${{ secrets.CLAWHUB_TOKEN != '' }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           clawhub skill publish ./skills/openclaw \
