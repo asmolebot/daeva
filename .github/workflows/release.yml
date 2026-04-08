@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (for example v0.2.0)'
+        required: true
+        type: string
 
 jobs:
   release:
@@ -12,9 +18,20 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Validate release tag format
+        run: |
+          case "$RELEASE_TAG" in
+            v*) ;;
+            *) echo "RELEASE_TAG must start with v (got: $RELEASE_TAG)" >&2; exit 1 ;;
+          esac
 
       - name: Use Node.js 22
         uses: actions/setup-node@v4
@@ -29,10 +46,12 @@ jobs:
       - name: Release checks (typecheck + build + test + pack dry-run)
         run: bash scripts/release-check.sh
 
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
+      - name: Ensure GitHub release exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
+          gh release create "$RELEASE_TAG" --generate-notes --title "$RELEASE_TAG"
 
       - name: Publish to npm
         if: ${{ secrets.NPM_TOKEN != '' }}
@@ -47,12 +66,12 @@ jobs:
       - name: Publish skill to ClaWHub
         if: ${{ secrets.CLAWHUB_TOKEN != '' }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           clawhub skill publish ./skills/openclaw \
             --slug daeva \
             --name "Daeva" \
             --version "$VERSION" \
-            --changelog "Release $GITHUB_REF_NAME" \
+            --changelog "Release $RELEASE_TAG" \
             --tags latest \
             --no-input
         env:
