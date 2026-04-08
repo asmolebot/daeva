@@ -9,10 +9,10 @@ check() {
   local label="$1"; shift
   if "$@" >/dev/null 2>&1; then
     echo -e "${GREEN}PASS${NC}  $label"
-    ((PASS++))
+    PASS=$((PASS + 1))
   else
     echo -e "${RED}FAIL${NC}  $label"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
   fi
 }
 
