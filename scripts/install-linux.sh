@@ -270,7 +270,7 @@ if [[ -f "$(pwd)/package.json" ]] && grep -q '"daeva"' "$(pwd)/package.json" 2>/
   run "cp -r . '${INSTALL_DIR}/'"
 else
   info "Installing from npm..."
-  run "npm install -g daeva"
+  run "npm install -g @asmostans/daeva"
 fi
 
 # Write .env

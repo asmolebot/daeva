@@ -57,7 +57,7 @@ The install scripts in `scripts/` are designed to be hosted at:
 To set this up:
 1. Host the scripts behind a static file server or CDN at asmo.bot
 2. Ensure the scripts are served with correct content types (`text/plain` for `.sh`, `text/plain` for `.ps1`)
-3. The scripts detect whether they're in a local source tree or should install from npm — when served remotely they'll `npm install -g daeva`
+3. The scripts detect whether they're in a local source tree or should install from npm — when served remotely they'll `npm install -g @asmostans/daeva`
 
 ## ClaWHub skill packaging notes
 
@@ -65,5 +65,5 @@ When packaging Daeva as a ClaWHub skill:
 - The MCP server binary (`daeva-mcp`) is the integration point
 - Skill config should point at `daeva-mcp --base-url <url>`
 - The orchestrator server (`daeva`) runs separately as a background service
-- Skill metadata should reference the npm package name `daeva`
+- Skill metadata should reference the npm package name `@asmostans/daeva`
 - Consider shipping a minimal skill manifest that auto-starts the server if not already running

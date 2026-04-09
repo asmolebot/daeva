@@ -15,7 +15,7 @@ Local GPU pod orchestrator for AI workloads. One process to register, schedule, 
 ## Install
 
 ```bash
-npm install -g daeva
+npm install -g @asmostans/daeva
 ```
 
 Or from source:
