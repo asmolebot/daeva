@@ -1,15 +1,18 @@
 {
   "schemaVersion": "1",
   "packageType": "pod-package",
-  "name": "daeva-comfyui-pod",
-  "version": "0.1.0",
-  "description": "Portable pod package for ComfyUI image generation via daeva.",
+  "name": "daeva-comfyapi-pod",
+  "version": "0.2.0",
+  "description": "Portable Comfy package for image generation via Daeva using the canonical comfyapi pod id.",
   "pod": {
-    "id": "comfyui",
-    "nickname": "ComfyUI",
+    "id": "comfyapi",
+    "nickname": "ComfyAPI",
     "description": "Image generation pod backed by ComfyUI.",
     "manifestVersion": "1",
-    "capabilities": ["image-generation"],
+    "capabilities": [
+      "image-generation",
+      "vision"
+    ],
     "source": {
       "homepage": "https://github.com/comfyanonymous/ComfyUI",
       "repository": "https://github.com/your-org/daeva-comfyui-pod"
@@ -21,43 +24,156 @@
       "submitPath": "/prompt",
       "method": "POST"
     },
-    "install": { "command": "${PACKAGE_DIR}/scripts/install.sh" },
-    "startup": { "command": "${PACKAGE_DIR}/scripts/start.sh" },
-    "shutdown": { "command": "${PACKAGE_DIR}/scripts/stop.sh" },
-    "exclusivityGroup": "gpu-0"
+    "install": {
+      "command": "${PACKAGE_DIR}/scripts/install.sh",
+      "env": {
+        "PACKAGE_DIR": "${PACKAGE_DIR}",
+        "MODELS_DIR": "${MODELS_DIR}",
+        "INPUT_DIR": "${INPUT_DIR}",
+        "OUTPUT_DIR": "${OUTPUT_DIR}",
+        "TEMP_DIR": "${TEMP_DIR}",
+        "CUSTOM_NODES_DIR": "${CUSTOM_NODES_DIR}"
+      }
+    },
+    "startup": {
+      "command": "${PACKAGE_DIR}/scripts/start.sh",
+      "env": {
+        "PACKAGE_DIR": "${PACKAGE_DIR}",
+        "MODELS_DIR": "${MODELS_DIR}",
+        "INPUT_DIR": "${INPUT_DIR}",
+        "OUTPUT_DIR": "${OUTPUT_DIR}",
+        "TEMP_DIR": "${TEMP_DIR}",
+        "CUSTOM_NODES_DIR": "${CUSTOM_NODES_DIR}",
+        "COMFY_WORKFLOWS_DIR": "${PACKAGE_DIR}/workflows",
+        "COMFY_HEALTH_URL": "http://127.0.0.1:8188/system_stats"
+      }
+    },
+    "shutdown": {
+      "command": "${PACKAGE_DIR}/scripts/stop.sh",
+      "env": {
+        "COMFY_CONTAINER_NAME": "comfyapi"
+      }
+    },
+    "exclusivityGroup": "gpu-0",
+    "metadata": {
+      "packageManifestVersion": "1",
+      "workflow": {
+        "path": "workflows/text-to-image.json",
+        "promptNodeId": "2",
+        "promptInputName": "text",
+        "outputNodeId": "7"
+      },
+      "defaultModelArtifact": {
+        "filename": "comfyapi-demo-placeholder.safetensors",
+        "sourceUrl": "file://${PACKAGE_DIR}/artifacts/models/comfyapi-demo-placeholder.safetensors",
+        "sha256": "1252c303db5df9e4941c8b72d8e8fb79a89b0c1384f8d2ef2baeb28750da4329",
+        "targetDirectory": "models/checkpoints"
+      }
+    }
   },
   "artifacts": {
     "readme": "README.md",
     "installScript": "scripts/install.sh",
     "startScript": "scripts/start.sh",
     "stopScript": "scripts/stop.sh",
-    "quadlet": "deploy/comfyui.container"
+    "quadlet": "deploy/comfyapi.container"
   },
   "directories": [
-    { "path": "${HOME}/ai/services/comfy/models", "purpose": "models", "required": true, "createIfMissing": true },
-    { "path": "${HOME}/ai/services/comfy/output", "purpose": "output", "createIfMissing": true },
-    { "path": "${HOME}/ai/services/comfy/input", "purpose": "input", "createIfMissing": true }
+    {
+      "path": "${DATA_DIR}/models",
+      "purpose": "models",
+      "required": true,
+      "createIfMissing": true,
+      "description": "Runtime model directory mounted at /opt/ComfyUI/models."
+    },
+    {
+      "path": "${DATA_DIR}/input",
+      "purpose": "input",
+      "createIfMissing": true,
+      "description": "Runtime input directory mounted at /opt/ComfyUI/input."
+    },
+    {
+      "path": "${DATA_DIR}/output",
+      "purpose": "output",
+      "createIfMissing": true,
+      "description": "Runtime output directory mounted at /opt/ComfyUI/output."
+    },
+    {
+      "path": "${DATA_DIR}/temp",
+      "purpose": "temp",
+      "createIfMissing": true,
+      "description": "Runtime temp directory mounted at /opt/ComfyUI/temp."
+    },
+    {
+      "path": "${DATA_DIR}/custom_nodes",
+      "purpose": "custom-nodes",
+      "createIfMissing": true,
+      "description": "Runtime custom nodes directory mounted at /opt/ComfyUI/custom_nodes."
+    }
   ],
   "environment": [
-    { "name": "COMFY_PORT", "default": "8188" }
+    {
+      "name": "COMFY_PORT",
+      "default": "8188",
+      "description": "Comfy API port."
+    },
+    {
+      "name": "COMFY_IMAGE",
+      "default": "ghcr.io/saladtechnologies/comfyui-api:comfy0.12.3-api1.17.1-torch2.8.0-cuda12.8-runtime",
+      "description": "Container image for the packaged Comfy runtime."
+    }
   ],
-  "install": { "strategy": "prebuilt-image" },
+  "install": {
+    "strategy": "prebuilt-image",
+    "notes": "Install hooks create runtime dirs, validate the packaged workflow, and place one deterministic default model artifact."
+  },
   "service": {
     "installMode": "quadlet",
-    "serviceName": "daeva-comfyui",
+    "serviceName": "comfyapi",
     "quadlet": {
-      "image": "docker.io/library/daeva-comfyui:latest",
-      "publishPort": ["8188:8188"],
-      "volume": [
-        "${HOME}/ai/services/comfy/models:/models",
-        "${HOME}/ai/services/comfy/output:/output"
+      "image": "ghcr.io/saladtechnologies/comfyui-api:comfy0.12.3-api1.17.1-torch2.8.0-cuda12.8-runtime",
+      "publishPort": [
+        "8188:8188"
       ],
-      "device": ["nvidia.com/gpu=all"],
-      "containerName": "daeva-comfyui"
+      "volume": [
+        "${MODELS_DIR}:/opt/ComfyUI/models",
+        "${INPUT_DIR}:/opt/ComfyUI/input",
+        "${OUTPUT_DIR}:/opt/ComfyUI/output",
+        "${TEMP_DIR}:/opt/ComfyUI/temp",
+        "${CUSTOM_NODES_DIR}:/opt/ComfyUI/custom_nodes",
+        "${PACKAGE_DIR}/workflows:/opt/ComfyUI/user/default/workflows:ro"
+      ],
+      "device": [
+        "nvidia.com/gpu=all"
+      ],
+      "containerName": "comfyapi"
     },
-    "systemd": { "after": ["network-online.target"], "wantedBy": ["default.target"], "restart": "on-failure", "timeoutStartSec": 120 }
+    "systemd": {
+      "after": [
+        "network-online.target"
+      ],
+      "wantedBy": [
+        "default.target"
+      ],
+      "restart": "on-failure",
+      "timeoutStartSec": 120
+    }
   },
+  "examples": [
+    {
+      "name": "text-to-image",
+      "description": "Packaged Comfy workflow via Daeva proxy.",
+      "request": {
+        "type": "generate-image",
+        "capability": "image-generation",
+        "input": {
+          "prompt": "a cozy study with warm lamp light"
+        }
+      }
+    }
+  ],
   "source": {
-    "repository": "https://github.com/your-org/daeva-comfyui-pod"
+    "repository": "https://github.com/your-org/daeva-comfyui-pod",
+    "documentation": "https://github.com/your-org/daeva-comfyui-pod#readme"
   }
 }

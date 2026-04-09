@@ -307,7 +307,7 @@ export interface PodRegistryIndex {
   entries: PodRegistryIndexEntry[];
 }
 
-export type PodPackageDirectoryPurpose = 'config' | 'data' | 'models' | 'input' | 'output' | 'cache' | 'workspace' | 'custom';
+export type PodPackageDirectoryPurpose = 'config' | 'data' | 'models' | 'input' | 'output' | 'cache' | 'workspace' | 'custom' | 'temp' | 'custom-nodes';
 
 export interface InstalledPackageResolvedDirectory {
   path: string;

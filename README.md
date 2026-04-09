@@ -10,7 +10,7 @@ Local GPU pod orchestrator for AI workloads. One process to register, schedule, 
 - **Pod packages** — portable `pod-package.json` format for distributing pod definitions
 - **Package install** — materialize packages from local paths, Git repos, archives, or registries
 - **MCP server** — expose orchestrator capabilities to AI coding assistants via `daeva-mcp`
-- **Built-in pods** — sample definitions for ComfyUI, Whisper, and OCR/Vision
+- **Built-in pods** — bundled compatibility manifests for ComfyUI, Whisper, and OCR/Vision
 
 ## Install
 
@@ -78,7 +78,14 @@ Install a pod package:
 ```bash
 curl -X POST http://127.0.0.1:8787/pods/create \
   -H 'Content-Type: application/json' \
-  -d '{"alias": "whisper"}'
+  -d '{"alias": "comfyapi"}'
+```
+
+Then point Comfy clients at Daeva's proxy instead of raw port 8188:
+
+```bash
+export DAEVA_BASE=http://127.0.0.1:8787
+curl "$DAEVA_BASE/proxy/comfyapi/system_stats"
 ```
 
 ## MCP server
@@ -179,7 +186,7 @@ During install, Daeva now runs package install hooks, creates declared host dire
 
 | Pod ID      | Capabilities                | Description                     |
 |-------------|-----------------------------|---------------------------------|
-| `comfyapi`  | image-generation, vision    | ComfyUI/comfyapi backend       |
+| `comfyapi`  | image-generation, vision    | ComfyUI compatibility manifest, prefer the packaged `comfyapi` alias |
 | `whisper`   | speech-to-text              | Whisper transcription           |
 | `ocr-vision`| ocr, vision                 | OCR and visual analysis         |
 

@@ -1,0 +1,20 @@
+[Unit]
+Description=Daeva ComfyAPI container
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=ghcr.io/saladtechnologies/comfyui-api:comfy0.12.3-api1.17.1-torch2.8.0-cuda12.8-runtime
+ContainerName=comfyapi
+PublishPort=8188:8188
+Volume=%h/.local/share/containers/storage/volumes/daeva-comfyapi-models:/opt/ComfyUI/models
+Volume=%h/.local/share/containers/storage/volumes/daeva-comfyapi-input:/opt/ComfyUI/input
+Volume=%h/.local/share/containers/storage/volumes/daeva-comfyapi-output:/opt/ComfyUI/output
+Device=nvidia.com/gpu=all
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target

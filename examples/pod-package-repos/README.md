@@ -54,7 +54,8 @@ daeva-comfyui-pod/
     comfyui.container       # quadlet unit
 ```
 
-**Registry alias:** `comfy`  
+**Registry alias:** `comfyapi`  
+**Compatibility alias:** `comfy`  
 **Capability:** `image-generation`
 
 ---
@@ -84,18 +85,18 @@ daeva-vision-pod/
 
 ## How Split Works with the Registry
 
-The local registry index (`src/manifests/local-registry-index.json`) references each repo
-as a `github-repo` source. When a user runs:
+The local registry index (`src/manifests/local-registry-index.json`) references each repo.
+When a user runs:
 
 ```bash
 curl -X POST http://localhost:8787/pods/create -d '{"alias":"whisper"}'
 ```
 
 The orchestrator:
-1. Resolves `whisper` alias → `GithubRepoRegistrySource { repo: "your-org/daeva-whisper-pod" }`
-2. Clones the repo into `.data/pod-packages/whisper/`
+1. Resolves an alias like `comfyapi` to its package source
+2. Materializes the package into managed storage
 3. Validates `pod-package.json`
-4. Runs install hooks (podman pull, dir creation, etc.)
+4. Runs install hooks (dir creation, workflow checks, image pull, default artifact validation, etc.)
 
 No changes to the orchestrator source are needed when new pod packages are published.
 
@@ -124,5 +125,5 @@ Update `src/manifests/local-registry-index.json` entries to point at real repos:
 
 See sibling directories for per-package stubs:
 - [`daeva-whisper-pod/`](./daeva-whisper-pod/) — Whisper package stub
-- [`daeva-comfyui-pod/`](./daeva-comfyui-pod/) — ComfyUI package stub
+- [`daeva-comfyui-pod/`](./daeva-comfyui-pod/) — canonical Comfy package example
 - [`daeva-vision-pod/`](./daeva-vision-pod/) — Vision/OCR package stub

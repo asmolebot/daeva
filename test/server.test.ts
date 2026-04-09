@@ -178,7 +178,7 @@ describe('HTTP API', () => {
     const response = await app.inject({ method: 'GET', url: '/pods/aliases' });
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.aliases.map((entry: { alias: string }) => entry.alias)).toEqual(['whisper', 'comfy', 'vision']);
+    expect(body.aliases.map((entry: { alias: string }) => entry.alias)).toEqual(['whisper', 'comfyapi', 'comfy', 'vision']);
   });
 
   it('activates, swaps, and stops pods through explicit lifecycle endpoints', async () => {
@@ -318,7 +318,7 @@ describe('HTTP API', () => {
     expect(response.statusCode).toBe(404);
     const body = response.json();
     expect(body.error.message).toContain('Unknown pod alias: totally-not-real');
-    expect(body.error.details.knownAliases).toEqual(['whisper', 'comfy', 'vision']);
+    expect(body.error.details.knownAliases).toEqual(['whisper', 'comfyapi', 'comfy', 'vision']);
   });
 
   it('rejects invalid jobs with a structured validation payload', async () => {
@@ -405,10 +405,9 @@ describe('HTTP API', () => {
       detection: 'podman'
     });
     expect(body.packages.summary.installedPackages).toBe(3);
-    expect(body.packages.summary.registryAliases).toBe(3);
+    expect(body.packages.summary.registryAliases).toBe(4);
     expect(body.packages.summary.registrySourceKinds).toEqual([
-      { kind: 'github-repo', count: 1 },
-      { kind: 'local-file', count: 1 },
+      { kind: 'local-file', count: 3 },
       { kind: 'registry-index', count: 1 }
     ]);
     expect(body.scheduler.summary.exclusivityGroups).toBeGreaterThanOrEqual(1);
@@ -428,7 +427,7 @@ describe('HTTP API', () => {
     expect(packagesResponse.statusCode).toBe(200);
     const packagesBody = packagesResponse.json();
     expect(packagesBody.installedPackages.map((pkg: { alias: string }) => pkg.alias)).toEqual(['archive-whisper', 'git-whisper', 'whisper']);
-    expect(packagesBody.registry.indexes[0].entryCount).toBe(3);
+    expect(packagesBody.registry.indexes[0].entryCount).toBe(4);
 
     const schedulerResponse = await app.inject({ method: 'GET', url: '/status/scheduler' });
     expect(schedulerResponse.statusCode).toBe(200);

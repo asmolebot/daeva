@@ -234,7 +234,7 @@ export const podPackageManifestSchema = z.object({
   }).optional(),
   directories: z.array(z.object({
     path: safeRelativePathSchema,
-    purpose: z.enum(['config', 'data', 'models', 'input', 'output', 'cache', 'workspace', 'custom']),
+    purpose: z.enum(['config', 'data', 'models', 'input', 'output', 'cache', 'workspace', 'custom', 'temp', 'custom-nodes']),
     required: z.boolean().optional(),
     createIfMissing: z.boolean().optional(),
     description: z.string().min(1).optional()
@@ -334,7 +334,7 @@ export const installedPackageMetadataSchema = z.object({
   resolvedTemplateContext: z.record(z.string()).optional(),
   resolvedDirectories: z.array(z.object({
     path: z.string().min(1),
-    purpose: z.enum(['config', 'data', 'models', 'input', 'output', 'cache', 'workspace', 'custom']),
+    purpose: z.enum(['config', 'data', 'models', 'input', 'output', 'cache', 'workspace', 'custom', 'temp', 'custom-nodes']),
     description: z.string().min(1).optional(),
     templateVars: z.array(z.string().min(1))
   })).optional()

@@ -18,17 +18,29 @@
       }
     },
     {
-      "alias": "comfy",
-      "packageName": "asmo-comfy-community",
+      "alias": "comfyapi",
+      "packageName": "daeva-comfyapi-pod",
       "podId": "comfyapi",
-      "description": "Community ComfyUI-style image generation package from GitHub.",
+      "description": "Canonical packaged ComfyUI alias.",
       "capabilities": ["image-generation", "vision"],
-      "tags": ["community", "image-generation", "comfyui"],
+      "tags": ["community", "image-generation", "comfyui", "canonical"],
       "source": {
-        "kind": "github-repo",
-        "repo": "asmoai/asmo-comfy-community-pod",
-        "ref": "main",
-        "packageManifestPath": "pod-package.json"
+        "kind": "local-file",
+        "path": "examples/pod-package-repos/daeva-comfyui-pod",
+        "packageManifestPath": "examples/pod-package-repos/daeva-comfyui-pod/pod-package.json"
+      }
+    },
+    {
+      "alias": "comfy",
+      "packageName": "daeva-comfyapi-pod",
+      "podId": "comfyapi",
+      "description": "Legacy compatibility alias for the canonical comfyapi package.",
+      "capabilities": ["image-generation", "vision"],
+      "tags": ["community", "image-generation", "comfyui", "compatibility"],
+      "source": {
+        "kind": "local-file",
+        "path": "examples/pod-package-repos/daeva-comfyui-pod",
+        "packageManifestPath": "examples/pod-package-repos/daeva-comfyui-pod/pod-package.json"
       }
     },
     {

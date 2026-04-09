@@ -329,7 +329,10 @@ export async function runInstallHooks(
     const resolvedCwd = installCmd.cwd
       ? applyTemplateToPath(installCmd.cwd, ctx)
       : packagePath;
-    const resolvedEnv = applyTemplateToEnv(installCmd.env, ctx);
+    const resolvedEnv = {
+      ...(applyTemplateToEnv(installCmd.env, ctx) ?? {}),
+      ...(skipPodmanSteps ? { SKIP_PODMAN_STEPS: '1' } : {})
+    };
     steps.push(await installCommandStep(resolvedCommand, resolvedCwd, resolvedEnv, dryRun));
   }
 

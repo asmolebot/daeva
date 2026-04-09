@@ -1,45 +1,67 @@
 # daeva-comfyui-pod
 
-> **Pod package stub** — to be published as a separate repo.
+Portable Comfy package for Daeva using the canonical pod id `comfyapi`.
 
-Portable pod package for running [ComfyUI](https://github.com/comfyanonymous/ComfyUI) as a
-local image-generation HTTP service managed by `daeva`.
+## Canonical identity
 
-## Install via orchestrator
+- Pod id: `comfyapi`
+- Proxy base URL: `$DAEVA_BASE/proxy/comfyapi`
+- Legacy alias: `comfy` (compat only)
 
-```bash
-curl -X POST http://localhost:8787/pods/create \
-  -H 'Content-Type: application/json' \
-  -d '{"alias":"comfy"}'
-```
-
-## Requirements
-
-- Podman (or Docker)
-- NVIDIA GPU + CUDA drivers
-- ~10–50 GB disk (depends on models)
-
-## Configuration
-
-| Env var | Default | Description |
-|---------|---------|-------------|
-| `COMFY_PORT` | `8188` | Service port |
-| `COMFY_MODELS_DIR` | `~/ai/services/comfy/models` | Model weights directory |
-| `COMFY_OUTPUT_DIR` | `~/ai/services/comfy/output` | Generated image output |
-
-## Service port
-
-`8188` — ComfyUI native API (`POST /prompt`, `GET /history/{id}`, `GET /system_stats`)
-
-## Quadlet install
+Install it with:
 
 ```bash
-cp deploy/comfyui.container ~/.config/containers/systemd/
-systemctl --user daemon-reload
-systemctl --user start comfyui
+curl -X POST http://127.0.0.1:8787/pods/create   -H 'Content-Type: application/json'   -d '{"alias":"comfyapi"}'
 ```
 
-## See also
+## Layout
 
-- [daeva](https://github.com/your-org/daeva)
-- [ComfyUI](https://github.com/comfyanonymous/ComfyUI)
+Readonly package assets:
+- `workflows/text-to-image.json`
+- `scripts/`
+- `artifacts/models/comfyapi-demo-placeholder.safetensors`
+
+Writable runtime directories are resolved by install hooks under the package data dir:
+- `data/models`
+- `data/input`
+- `data/output`
+- `data/temp`
+- `data/custom_nodes`
+
+## Stock workflow contract
+
+Bundled workflow: `workflows/text-to-image.json`
+
+- `promptNodeId`: `2`
+- `promptInputName`: `text`
+- `outputNodeId`: `7`
+- expected checkpoint: `checkpoints/comfyapi-demo-placeholder.safetensors`
+
+This bundled checkpoint is a deterministic placeholder so installs and tests have an exact artifact contract. It is **not** a production model. For real generations, override:
+- `COMFY_DEFAULT_MODEL_SOURCE_URL`
+- `COMFY_DEFAULT_MODEL_SHA256`
+- `COMFY_DEFAULT_MODEL_FILENAME`
+
+Expected default artifact:
+- filename: `comfyapi-demo-placeholder.safetensors`
+- source: `file://${PACKAGE_DIR}/artifacts/models/comfyapi-demo-placeholder.safetensors`
+- sha256: `1252c303db5df9e4941c8b72d8e8fb79a89b0c1384f8d2ef2baeb28750da4329`
+- destination: `models/checkpoints/comfyapi-demo-placeholder.safetensors`
+
+## OpenClaw provider example
+
+Point clients at Daeva's proxy, not raw port 8188:
+
+```json
+{
+  "providers": {
+    "comfy": {
+      "baseUrl": "http://127.0.0.1:8787/proxy/comfyapi",
+      "workflowPath": "./workflows/text-to-image.json",
+      "promptNodeId": "2",
+      "promptInputName": "text",
+      "outputNodeId": "7"
+    }
+  }
+}
+```

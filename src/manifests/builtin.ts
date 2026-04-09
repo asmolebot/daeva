@@ -4,7 +4,7 @@ export const builtinManifests: PodManifest[] = [
   {
     id: 'comfyapi',
     nickname: 'Comfy',
-    description: 'ComfyUI-style image generation pod for prompt-driven GPU jobs.',
+    description: 'Compatibility manifest for ComfyUI-style image generation. Prefer installing the packaged `comfyapi` alias.',
     manifestVersion: '1',
     capabilities: ['image-generation', 'vision'],
     source: {
@@ -14,13 +14,13 @@ export const builtinManifests: PodManifest[] = [
     },
     runtime: {
       kind: 'http-service',
-      baseUrl: 'http://127.0.0.1:3000',
-      healthPath: '/health',
+      baseUrl: 'http://127.0.0.1:8188',
+      healthPath: '/system_stats',
       submitPath: '/prompt',
       method: 'POST'
     },
     startup: {
-      command: `sh -lc 'podman container exists comfyapi && podman start comfyapi || podman run -d --name comfyapi --replace --device nvidia.com/gpu=all -p 3000:3000 -p 8188:8188 -v /home/clohl/ai/comfy/models:/opt/ComfyUI/models -v /home/clohl/ai/comfy/input:/opt/ComfyUI/input -v /home/clohl/ai/comfy/output:/opt/ComfyUI/output -v /home/clohl/ai/comfy/workflows:/opt/ComfyUI/user/default/workflows -v /home/clohl/ai/comfy/temp:/opt/ComfyUI/temp -v /home/clohl/ai/comfy/custom_nodes:/opt/ComfyUI/custom_nodes ghcr.io/saladtechnologies/comfyui-api:comfy0.12.3-api1.17.1-torch2.8.0-cuda12.8-runtime'`,
+      command: `sh -lc 'podman container exists comfyapi && podman start comfyapi || podman run -d --name comfyapi --replace --device nvidia.com/gpu=all -p 8188:8188 -v \${HOME}/.local/share/daeva/comfyapi/models:/opt/ComfyUI/models -v \${HOME}/.local/share/daeva/comfyapi/input:/opt/ComfyUI/input -v \${HOME}/.local/share/daeva/comfyapi/output:/opt/ComfyUI/output -v \${HOME}/.local/share/daeva/comfyapi/temp:/opt/ComfyUI/temp -v \${HOME}/.local/share/daeva/comfyapi/custom_nodes:/opt/ComfyUI/custom_nodes ghcr.io/saladtechnologies/comfyui-api:comfy0.12.3-api1.17.1-torch2.8.0-cuda12.8-runtime'`,
       simulatedDelayMs: 250
     },
     shutdown: {
@@ -30,7 +30,10 @@ export const builtinManifests: PodManifest[] = [
     exclusivityGroup: 'gpu-0',
     metadata: {
       packageManifestVersion: '1',
-      packaged: true
+      packaged: true,
+      deprecatedBuiltin: true,
+      installAlias: 'comfyapi',
+      legacyAliases: ['comfy']
     }
   },
   {
