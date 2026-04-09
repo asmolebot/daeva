@@ -197,6 +197,41 @@ resolve_stable_node_exec() {
   command -v node
 }
 
+resolve_stable_daeva_exec() {
+  local stable_node
+  stable_node="$(resolve_stable_node_exec 2>/dev/null || true)"
+
+  if [[ -n "${DAEVA_FNM_BIN:-}" ]]; then
+    local fnm_dir="${FNM_DIR:-$HOME/.local/share/fnm}"
+    local fnm_current
+    fnm_current="$($DAEVA_FNM_BIN current 2>/dev/null || true)"
+    if [[ -n "$fnm_current" && "$fnm_current" != "system" ]]; then
+      local stable_js="$fnm_dir/node-versions/$fnm_current/installation/lib/node_modules/@asmostans/daeva/dist/src/cli.js"
+      if [[ -f "$stable_js" ]]; then
+        printf '%s\n' "$stable_js"
+        return 0
+      fi
+    fi
+  fi
+
+  if command -v npm &>/dev/null; then
+    local npm_root="$(npm root -g 2>/dev/null || true)"
+    local npm_js="$npm_root/@asmostans/daeva/dist/src/cli.js"
+    if [[ -f "$npm_js" ]]; then
+      printf '%s\n' "$npm_js"
+      return 0
+    fi
+  fi
+
+  local install_js="${INSTALL_DIR}/node_modules/@asmostans/daeva/dist/src/cli.js"
+  if [[ -f "$install_js" ]]; then
+    printf '%s\n' "$install_js"
+    return 0
+  fi
+
+  command -v daeva
+}
+
 install_node() {
   info "Installing Node.js ${NODE_VERSION_REQUIRED}+..."
   case "${PKG_MGR}" in
@@ -317,18 +352,10 @@ if [[ "${SKIP_SERVICE}" == "false" ]]; then
   NODE_EXEC="$(resolve_stable_node_exec 2>/dev/null || true)"
   [[ -n "${NODE_EXEC}" ]] || die "Unable to resolve node binary for systemd service"
 
-  if command -v daeva &>/dev/null; then
-    DAEVA_BIN="$(command -v daeva)"
-  else
-    DAEVA_BIN="${INSTALL_DIR}/node_modules/@asmostans/daeva/dist/src/cli.js"
-    [[ -f "${DAEVA_BIN}" ]] || DAEVA_BIN="${INSTALL_DIR}/node_modules/.bin/daeva"
-  fi
+  DAEVA_BIN="$(resolve_stable_daeva_exec 2>/dev/null || true)"
+  [[ -n "${DAEVA_BIN}" ]] || die "Unable to resolve daeva executable for systemd service"
 
-  if [[ "${DAEVA_BIN}" == *.js ]]; then
-    EXEC_START="${NODE_EXEC} ${DAEVA_BIN}"
-  else
-    EXEC_START="${NODE_EXEC} ${DAEVA_BIN}"
-  fi
+  EXEC_START="${NODE_EXEC} ${DAEVA_BIN}"
 
   info "Writing systemd user unit to ${UNIT_FILE}..."
   run "mkdir -p '${SYSTEMD_USER_DIR}'"
