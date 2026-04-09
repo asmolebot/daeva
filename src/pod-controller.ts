@@ -140,17 +140,24 @@ export class PodController {
 
     state.status = 'starting';
 
-    if (manifest.runtime.kind === 'rpod') {
-      const rpodRuntime = manifest.runtime as RpodRuntime;
-      const podId = await rpodRun(rpodRuntime);
-      setRpodPodId(manifest.id, podId);
-    } else {
-      await this.runLifecycleCommand(manifest.id, manifest.startup);
-    }
+    try {
+      if (manifest.runtime.kind === 'rpod') {
+        const rpodRuntime = manifest.runtime as RpodRuntime;
+        const podId = await rpodRun(rpodRuntime);
+        setRpodPodId(manifest.id, podId);
+      } else {
+        await this.runLifecycleCommand(manifest.id, manifest.startup);
+      }
 
-    await this.waitForHealth(manifest);
-    state.status = 'running';
-    state.lastStartedAt = new Date().toISOString();
+      await this.waitForHealth(manifest);
+      state.status = 'running';
+      state.lastStartedAt = new Date().toISOString();
+    } catch (error) {
+      await this.rollbackFailedStart(manifest);
+      state.status = 'stopped';
+      state.lastStoppedAt = new Date().toISOString();
+      throw error;
+    }
   }
 
   async stop(manifest: PodManifest): Promise<void> {
@@ -269,6 +276,27 @@ export class PodController {
 
   private getTemplateContext(podId: string): TemplateContext {
     return this.podTemplateContexts.get(podId) ?? this.templateCtx;
+  }
+
+  private async rollbackFailedStart(manifest: PodManifest): Promise<void> {
+    try {
+      if (manifest.runtime.kind === 'rpod') {
+        const rpodRuntime = manifest.runtime as RpodRuntime;
+        const podId = getRpodPodId(manifest.id);
+        if (podId) {
+          await rpodStop(rpodRuntime, podId);
+          clearRpodPodId(manifest.id);
+        }
+        return;
+      }
+
+      if (manifest.shutdown) {
+        await this.runLifecycleCommand(manifest.id, manifest.shutdown);
+      }
+    } catch (rollbackError) {
+      const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+      console.error(`[pod-controller] rollback failed for pod ${manifest.id}: ${message}`);
+    }
   }
 
   private async waitForHealth(manifest: PodManifest): Promise<void> {

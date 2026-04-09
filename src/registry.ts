@@ -1,3 +1,7 @@
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import localRegistryIndex from './manifests/local-registry-index.json' with { type: 'json' };
 
 import {
@@ -7,16 +11,72 @@ import {
 } from './manifest-loader.js';
 import { builtinManifests } from './manifests/builtin.js';
 import type {
+  LocalFileRegistrySource,
   PodCapability,
   PodManifest,
   PodRegistryIndex,
-  PodRegistryIndexEntry
+  PodRegistryIndexEntry,
+  RegistrySource
 } from './types.js';
 
 export interface PodRegistryOptions {
   registryIndexes?: PodRegistryIndex[];
   aliasEntries?: PodRegistryIndexEntry[];
 }
+
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const packageRoot = path.resolve(moduleDir, '..');
+const packagedExamplesRoot = path.join(packageRoot, 'examples');
+const sourceExamplesRoot = path.resolve(moduleDir, '..', '..', 'examples');
+
+const resolveBundledLocalPath = (inputPath: string): string => {
+  if (path.isAbsolute(inputPath)) {
+    return inputPath;
+  }
+
+  const normalized = inputPath.replace(/\\/g, '/');
+  const exampleSuffix = normalized === 'examples' || normalized.startsWith('examples/')
+    ? normalized.slice('examples'.length).replace(/^\//, '')
+    : undefined;
+
+  const candidates = [
+    path.resolve(process.cwd(), inputPath),
+    path.resolve(packageRoot, inputPath),
+    path.resolve(moduleDir, inputPath),
+    ...(exampleSuffix !== undefined
+      ? [
+          path.join(packagedExamplesRoot, exampleSuffix),
+          path.join(sourceExamplesRoot, exampleSuffix)
+        ]
+      : [])
+  ];
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? path.resolve(packageRoot, inputPath);
+};
+
+const normalizeRegistrySource = (source: RegistrySource): RegistrySource => {
+  if (source.kind !== 'local-file') {
+    return source;
+  }
+
+  return {
+    ...source,
+    path: resolveBundledLocalPath(source.path)
+  };
+};
+
+const normalizeRegistryIndexEntry = (entry: PodRegistryIndexEntry): PodRegistryIndexEntry => ({
+  ...entry,
+  source: normalizeRegistrySource(entry.source)
+});
+
+const normalizeRegistryIndex = (index: PodRegistryIndex): PodRegistryIndex => ({
+  ...index,
+  entries: index.entries.map((entry) => normalizeRegistryIndexEntry(entry))
+});
+
+const isNormalizedLocalEntry = (entry: PodRegistryIndexEntry): boolean =>
+  entry.source.kind === 'local-file' && path.isAbsolute(entry.source.path);
 
 export class PodRegistry {
   private readonly manifests = new Map<string, PodManifest>();
@@ -40,15 +100,19 @@ export class PodRegistry {
 
   addRegistryIndex(index: PodRegistryIndex): PodRegistryIndex {
     const parsed = parsePodRegistryIndex(index);
-    this.registryIndexes.push(parsed);
-    parsed.entries.forEach((entry) => this.registerAlias(entry));
-    return parsed;
+    const normalized = normalizeRegistryIndex(parsed);
+    this.registryIndexes.push(normalized);
+    normalized.entries.forEach((entry) => {
+      this.aliases.set(entry.alias, entry);
+    });
+    return normalized;
   }
 
   registerAlias(entry: PodRegistryIndexEntry): PodRegistryIndexEntry {
-    const parsed = parsePodRegistryIndexEntry(entry);
-    this.aliases.set(parsed.alias, parsed);
-    return parsed;
+    const parsed = isNormalizedLocalEntry(entry) ? entry : parsePodRegistryIndexEntry(entry);
+    const normalized = normalizeRegistryIndexEntry(parsed);
+    this.aliases.set(normalized.alias, normalized);
+    return normalized;
   }
 
   list(): PodManifest[] {

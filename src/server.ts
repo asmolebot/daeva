@@ -45,6 +45,15 @@ export interface AppDependencies {
   installHookOptions?: { dryRun?: boolean; skipPodmanSteps?: boolean; templateContext?: Record<string, string> };
 }
 
+const shouldActivateInstalledManifest = (existingManifest: PodManifest | undefined): boolean => {
+  if (!existingManifest) {
+    return true;
+  }
+
+  const metadata = existingManifest.metadata as Record<string, unknown> | undefined;
+  return metadata?.deprecatedBuiltin === true;
+};
+
 export const buildApp = async (dependencies: AppDependencies = {}) => {
   const registry = dependencies.registry ?? new PodRegistry();
   const podController = dependencies.podController ?? new PodController(registry.list());
@@ -52,10 +61,15 @@ export const buildApp = async (dependencies: AppDependencies = {}) => {
   const jobManager = dependencies.jobManager ?? new JobManager(registry, podController, router);
   const installedPackageStore = dependencies.installedPackageStore ?? new InstalledPackageStore();
   for (const installedPackage of installedPackageStore.list()) {
-    if (!registry.get(installedPackage.manifest.pod.id)) {
-      registry.register(installedPackage.manifest.pod);
-    }
-    podController.syncManifest(installedPackage.manifest.pod, installedPackage.resolvedTemplateContext);
+    const activeManifest = shouldActivateInstalledManifest(registry.get(installedPackage.manifest.pod.id))
+      ? registry.register(installedPackage.manifest.pod)
+      : registry.get(installedPackage.manifest.pod.id) ?? installedPackage.manifest.pod;
+    podController.syncManifest(
+      activeManifest,
+      activeManifest.startup?.command === installedPackage.manifest.pod.startup?.command
+        ? installedPackage.resolvedTemplateContext
+        : undefined
+    );
   }
 
   const uploadMaxBytes = dependencies.uploadMaxBytes ?? DEFAULT_UPLOAD_MAX_BYTES;

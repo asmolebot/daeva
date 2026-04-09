@@ -50,4 +50,18 @@ describe('registry index + alias resolution', () => {
     expect(vision?.source.kind).toBe('registry-index');
     expect(vision?.source.kind === 'registry-index' ? vision.source.alias : undefined).toBe('ocr-vision');
   });
+
+  it('normalizes bundled local-file aliases to host-resolvable paths', () => {
+    const registry = new PodRegistry();
+    const comfyapi = registry.resolveAlias('comfyapi');
+
+    expect(comfyapi?.source.kind).toBe('local-file');
+    if (comfyapi?.source.kind !== 'local-file') {
+      throw new Error('Expected comfyapi local-file source');
+    }
+
+    expect(comfyapi.source.path).toMatch(/daeva-comfyui-pod/);
+    expect(comfyapi.source.path.startsWith('/')).toBe(true);
+    expect(comfyapi.source.packageManifestPath).toBe('examples/pod-package-repos/daeva-comfyui-pod/pod-package.json');
+  });
 });

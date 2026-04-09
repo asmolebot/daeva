@@ -1,4 +1,4 @@
-import { copyFileSync, cpSync, lstatSync, mkdtempSync, mkdirSync, opendirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, lstatSync, mkdtempSync, mkdirSync, opendirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -154,16 +154,36 @@ const assertArchiveFilename = (filename: string) => {
 
 const resolveLocalSourcePaths = (projectRoot: string, source: LocalFileRegistrySource) => {
   const sourcePath = path.resolve(projectRoot, source.path);
-  const packageManifestPath = path.resolve(
-    projectRoot,
-    source.packageManifestPath ?? path.join(source.path, 'pod-package.json')
-  );
+  const packageManifestPath = (() => {
+    if (!source.packageManifestPath) {
+      return path.join(sourcePath, 'pod-package.json');
+    }
+
+    const candidates = path.isAbsolute(source.path)
+      ? [
+          path.resolve(sourcePath, source.packageManifestPath),
+          path.join(sourcePath, path.basename(source.packageManifestPath)),
+          path.resolve(projectRoot, source.packageManifestPath)
+        ]
+      : [path.resolve(projectRoot, source.packageManifestPath)];
+
+    return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+  })();
 
   return { sourcePath, packageManifestPath };
 };
 
 const getManagedPackagesRoot = (options: CreateFromAliasOptions) =>
   options.managedPackagesRoot ?? path.resolve(options.projectRoot ?? process.cwd(), '.data/pod-packages');
+
+const shouldActivateInstalledManifest = (existingManifest: ReturnType<CreateFromAliasOptions['registry']['get']>): boolean => {
+  if (!existingManifest) {
+    return true;
+  }
+
+  const metadata = existingManifest.metadata as Record<string, unknown> | undefined;
+  return metadata?.deprecatedBuiltin === true;
+};
 
 const persistInstalledPackage = async (
   registryEntry: PodRegistryIndexEntry,
@@ -196,10 +216,15 @@ const persistInstalledPackage = async (
     resolvedDirectories: hookResult.resolvedDirectories
   };
 
-  if (!options.registry.get(manifest.pod.id)) {
-    options.registry.register(manifest.pod);
-  }
-  options.podController.syncManifest(manifest.pod, hookResult.templateContext);
+  const activeManifest = shouldActivateInstalledManifest(options.registry.get(manifest.pod.id))
+    ? options.registry.register(manifest.pod)
+    : options.registry.get(manifest.pod.id) ?? manifest.pod;
+  options.podController.syncManifest(
+    activeManifest,
+    activeManifest.id === manifest.pod.id && activeManifest.startup?.command === manifest.pod.startup?.command
+      ? hookResult.templateContext
+      : undefined
+  );
   options.installedPackageStore.upsert(installedPackage);
 
   return {

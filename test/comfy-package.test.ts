@@ -65,7 +65,7 @@ describe('comfy package contract', () => {
     expect(existsSync(path.join(packageRoot, 'workflows/text-to-image.json'))).toBe(true);
   });
 
-  it('materializes the canonical comfyapi alias and persists resolved install metadata', async () => {
+  it('materializes the canonical comfyapi alias, persists resolved install metadata, and overrides the builtin manifest', async () => {
     const registry = new PodRegistry();
     const podController = new PodController(registry.list());
     const installedPackageStore = new InstalledPackageStore({
@@ -78,7 +78,7 @@ describe('comfy package contract', () => {
         registry,
         podController,
         installedPackageStore,
-        projectRoot: process.cwd(),
+        projectRoot: path.join(tempRoot, 'pretend-installed-host'),
         managedPackagesRoot: path.join(tempRoot, 'materialized-comfyapi'),
         installHookOptions: { dryRun: true, skipPodmanSteps: true }
       }
@@ -90,8 +90,15 @@ describe('comfy package contract', () => {
     const pkg = result.materialization.installedPackage;
     expect(pkg.alias).toBe('comfyapi');
     expect(pkg.podId).toBe('comfyapi');
+    expect(pkg.sourcePath).toContain('daeva-comfyui-pod');
+    expect(pkg.packageManifestPath).toContain('pod-package.json');
     expect(pkg.resolvedDirectories?.map((dir) => dir.purpose)).toContain('custom-nodes');
     expect(pkg.resolvedTemplateContext?.PACKAGE_DIR).toContain('materialized-comfyapi/comfyapi');
     expect(JSON.stringify(pkg)).not.toContain('/home/clohl/');
+
+    const activeManifest = registry.get('comfyapi');
+    expect(activeManifest?.description).toBe('Image generation pod backed by ComfyUI.');
+    expect(activeManifest?.startup?.command).toBe('${PACKAGE_DIR}/scripts/start.sh');
+    expect(installedPackageStore.list()[0].manifest.pod.startup?.command).toBe('${PACKAGE_DIR}/scripts/start.sh');
   });
 });

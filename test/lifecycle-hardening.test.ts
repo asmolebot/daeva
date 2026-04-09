@@ -90,6 +90,63 @@ function mockFetchFailThenSucceed(failCount: number) {
 }
 
 describe('PodController lifecycle hardening', () => {
+  describe('readiness-gated status transitions', () => {
+    it('stays in starting until readiness succeeds, then becomes running', async () => {
+      let releaseHealthCheck: (() => void) | undefined;
+      let callCount = 0;
+      globalThis.fetch = vi.fn(() => {
+        callCount += 1;
+        if (callCount === 1) {
+          return Promise.reject(new Error('ECONNREFUSED'));
+        }
+        return new Promise<Response>((resolve) => {
+          releaseHealthCheck = () => resolve({ ok: true, status: 200, statusText: 'OK' } as Response);
+        });
+      });
+
+      const manifest = makeManifest({
+        runtime: {
+          kind: 'http-service',
+          baseUrl: 'http://localhost:19876',
+          submitPath: '/api/submit',
+          healthPath: '/health',
+          healthCheck: { timeoutMs: 2000, intervalMs: 10 }
+        },
+        startup: { command: 'echo started' }
+      });
+
+      const controller = new PodController([manifest]);
+      const startPromise = controller.start(manifest);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(controller.getStatus(manifest.id)).toBe('starting');
+
+      releaseHealthCheck?.();
+      await startPromise;
+      expect(controller.getStatus(manifest.id)).toBe('running');
+    });
+
+    it('returns to stopped when startup health checks never pass', async () => {
+      mockUnhealthyFetch();
+
+      const manifest = makeManifest({
+        runtime: {
+          kind: 'http-service',
+          baseUrl: 'http://localhost:19876',
+          submitPath: '/api/submit',
+          healthPath: '/health',
+          healthCheck: { timeoutMs: 100, intervalMs: 10 }
+        },
+        startup: { command: 'echo started' },
+        shutdown: { command: 'echo rollback' }
+      });
+
+      const controller = new PodController([manifest]);
+      await expect(controller.start(manifest)).rejects.toThrow('Health check did not pass');
+      expect(controller.getStatus(manifest.id)).toBe('stopped');
+    });
+  });
+
   describe('lifecycle command timeout', () => {
     it('passes timeout to exec and succeeds within time', async () => {
       // Health check: first call fails (before start), second succeeds (after command)
