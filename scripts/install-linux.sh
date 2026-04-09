@@ -291,7 +291,21 @@ if [[ "${SKIP_SERVICE}" == "false" ]]; then
   SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
   UNIT_FILE="${SYSTEMD_USER_DIR}/${SERVICE_NAME}.service"
 
-  EXEC_START="$(command -v daeva 2>/dev/null || echo "${INSTALL_DIR}/node_modules/.bin/daeva")"
+  NODE_EXEC="$(command -v node 2>/dev/null || true)"
+  [[ -n "${NODE_EXEC}" ]] || die "Unable to resolve node binary for systemd service"
+
+  if command -v daeva &>/dev/null; then
+    DAEVA_BIN="$(command -v daeva)"
+  else
+    DAEVA_BIN="${INSTALL_DIR}/node_modules/@asmostans/daeva/dist/src/cli.js"
+    [[ -f "${DAEVA_BIN}" ]] || DAEVA_BIN="${INSTALL_DIR}/node_modules/.bin/daeva"
+  fi
+
+  if [[ "${DAEVA_BIN}" == *.js ]]; then
+    EXEC_START="${NODE_EXEC} ${DAEVA_BIN}"
+  else
+    EXEC_START="${NODE_EXEC} ${DAEVA_BIN}"
+  fi
 
   info "Writing systemd user unit to ${UNIT_FILE}..."
   run "mkdir -p '${SYSTEMD_USER_DIR}'"
