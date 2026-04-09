@@ -117,9 +117,11 @@ function hasNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function isComfyManifest(manifest: PodManifest, capability: string): boolean {
+function isComfyManifest(manifest: PodManifest, capability: string, request?: JobRequest): boolean {
   if (capability !== 'image-generation') return false;
   if (manifest.runtime.kind !== 'http-service') return false;
+  // Request-level workflow sources trigger Comfy path
+  if (request && (isRecord(request.input.workflow) || hasNonEmptyString(request.input.workflowPath as unknown))) return true;
   if (getComfyWorkflowConfig(manifest)) return true;
   return manifest.runtime.submitPath === '/prompt' && manifest.runtime.healthPath === '/system_stats';
 }
@@ -163,29 +165,38 @@ function resolveWorkflowPath(manifest: PodManifest, workflow: ComfyWorkflowConfi
   return packageDir ? path.resolve(packageDir, configuredPath) : undefined;
 }
 
-async function loadComfyWorkflow(manifest: PodManifest): Promise<{ config: ComfyWorkflowConfig; workflowPath: string; graph: ComfyWorkflowGraph }> {
-  const config = getComfyWorkflowConfig(manifest);
-  if (!config) {
-    throw new AppError(`Comfy pod ${manifest.id} is missing workflow metadata. Set metadata.workflow.workflowPath/path plus promptNodeId.`, {
-      code: 'COMFY_WORKFLOW_CONFIG_MISSING',
-      type: 'validation',
-      statusCode: 400,
-      retriable: false,
-      details: { podId: manifest.id }
-    });
-  }
+/**
+ * Resolve a workflowPath from the request against the manifest's package directory.
+ * Accepts absolute paths as-is; relative paths are resolved against PACKAGE_DIR.
+ */
+function resolveRequestWorkflowPath(manifest: PodManifest, requestPath: string): string {
+  if (path.isAbsolute(requestPath)) return requestPath;
 
-  const workflowPath = resolveWorkflowPath(manifest, config);
-  if (!workflowPath) {
-    throw new AppError(`Comfy pod ${manifest.id} does not expose a resolvable workflow path. Persist PACKAGE_DIR or use an absolute metadata.workflow path.`, {
+  const metadata = isRecord(manifest.metadata) ? manifest.metadata : undefined;
+  const templateContext = isRecord(metadata?.resolvedTemplateContext)
+    ? metadata.resolvedTemplateContext
+    : isRecord(metadata?.templateContext)
+      ? metadata.templateContext
+      : undefined;
+  const packageDir = hasNonEmptyString(templateContext?.PACKAGE_DIR)
+    ? templateContext.PACKAGE_DIR
+    : hasNonEmptyString(metadata?.materializedPath)
+      ? String(metadata.materializedPath)
+      : undefined;
+
+  if (!packageDir) {
+    throw new AppError(`Cannot resolve relative workflowPath "${requestPath}" for pod ${manifest.id}: no PACKAGE_DIR available`, {
       code: 'COMFY_WORKFLOW_PATH_UNRESOLVABLE',
       type: 'validation',
       statusCode: 400,
       retriable: false,
-      details: { podId: manifest.id, workflowPath: config.workflowPath ?? config.path }
+      details: { podId: manifest.id, workflowPath: requestPath }
     });
   }
+  return path.resolve(packageDir, requestPath);
+}
 
+async function loadWorkflowFromPath(manifest: PodManifest, workflowPath: string): Promise<ComfyWorkflowGraph> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(await readFile(workflowPath, 'utf8'));
@@ -209,7 +220,64 @@ async function loadComfyWorkflow(manifest: PodManifest): Promise<{ config: Comfy
     });
   }
 
-  return { config, workflowPath, graph: JSON.parse(JSON.stringify(parsed)) as ComfyWorkflowGraph };
+  return JSON.parse(JSON.stringify(parsed)) as ComfyWorkflowGraph;
+}
+
+/**
+ * Resolve Comfy workflow source with precedence:
+ *   1. request.input.workflow  — inline graph (highest)
+ *   2. request.input.workflowPath — absolute or package-relative path
+ *   3. manifest metadata workflow path (legacy)
+ */
+async function loadComfyWorkflow(manifest: PodManifest, request: JobRequest): Promise<{ config: ComfyWorkflowConfig; workflowPath: string; graph: ComfyWorkflowGraph }> {
+  const config = getComfyWorkflowConfig(manifest);
+
+  // --- Source 1: inline workflow graph from request ---
+  const inlineWorkflow = request.input.workflow;
+  if (isRecord(inlineWorkflow)) {
+    return {
+      config: config ?? { promptNodeId: '6', promptInputName: 'text' },
+      workflowPath: '<inline>',
+      graph: JSON.parse(JSON.stringify(inlineWorkflow)) as ComfyWorkflowGraph
+    };
+  }
+
+  // --- Source 2: workflowPath from request ---
+  const requestWfPath = request.input.workflowPath;
+  if (hasNonEmptyString(requestWfPath)) {
+    const resolved = resolveRequestWorkflowPath(manifest, requestWfPath);
+    const graph = await loadWorkflowFromPath(manifest, resolved);
+    return {
+      config: config ?? { promptNodeId: '6', promptInputName: 'text' },
+      workflowPath: resolved,
+      graph
+    };
+  }
+
+  // --- Source 3: manifest metadata workflow (legacy) ---
+  if (!config) {
+    throw new AppError(`Comfy pod ${manifest.id} is missing workflow metadata. Set metadata.workflow.workflowPath/path plus promptNodeId.`, {
+      code: 'COMFY_WORKFLOW_CONFIG_MISSING',
+      type: 'validation',
+      statusCode: 400,
+      retriable: false,
+      details: { podId: manifest.id }
+    });
+  }
+
+  const workflowPath = resolveWorkflowPath(manifest, config);
+  if (!workflowPath) {
+    throw new AppError(`Comfy pod ${manifest.id} does not expose a resolvable workflow path. Persist PACKAGE_DIR or use an absolute metadata.workflow path.`, {
+      code: 'COMFY_WORKFLOW_PATH_UNRESOLVABLE',
+      type: 'validation',
+      statusCode: 400,
+      retriable: false,
+      details: { podId: manifest.id, workflowPath: config.workflowPath ?? config.path }
+    });
+  }
+
+  const graph = await loadWorkflowFromPath(manifest, workflowPath);
+  return { config, workflowPath, graph };
 }
 
 function buildComfyExecutionPayload(manifest: PodManifest, request: JobRequest, loaded: { config: ComfyWorkflowConfig; workflowPath: string; graph: ComfyWorkflowGraph }): ComfyExecutionPayload {
@@ -339,8 +407,8 @@ export class HttpPodAdapter implements PodAdapter {
       let finalResponse: unknown;
       let bodyKind: 'json' | 'form-data';
 
-      if (isComfyManifest(manifest, capability)) {
-        const workflow = await loadComfyWorkflow(manifest);
+      if (isComfyManifest(manifest, capability, request)) {
+        const workflow = await loadComfyWorkflow(manifest, request);
         const comfyPayload = buildComfyExecutionPayload(manifest, request, workflow);
         const parsed = await this.executeWithRetry(url, {
           method,

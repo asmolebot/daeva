@@ -88,7 +88,19 @@ export DAEVA_BASE=http://127.0.0.1:8787
 curl "$DAEVA_BASE/proxy/comfyapi/system_stats"
 ```
 
-For `comfyapi` image jobs, Daeva now submits a real Comfy workflow payload to `/prompt` and polls `/history/<prompt_id>`. Packaged Comfy manifests should provide workflow metadata with `workflowPath` (or `path`), `promptNodeId`, optional `promptInputName` (defaults to `text`), and optional `outputNodeId`.
+For `comfyapi` image jobs, Daeva submits a Comfy workflow payload to `/prompt` and polls `/history/<prompt_id>`.
+
+### Workflow source precedence
+
+When submitting an image-generation job to a Comfy pod, the workflow graph is resolved in this order (highest priority first):
+
+1. **`request.input.workflow`** — inline workflow graph object sent with the job request. Useful for one-off or dynamically generated workflows.
+2. **`request.input.workflowPath`** — absolute path or package-relative path to a workflow JSON file. Relative paths are resolved against `PACKAGE_DIR`.
+3. **`manifest metadata.workflow.workflowPath`** (or `path`) — workflow path configured in the pod manifest. This is the legacy/default behavior.
+
+For raw-prompt requests (only `input.prompt`, no inline workflow), the workflow template is loaded from the highest-priority available source (workflowPath or manifest metadata) and the prompt is injected into the configured prompt node.
+
+Packaged Comfy manifests should provide workflow metadata with `workflowPath` (or `path`), `promptNodeId`, optional `promptInputName` (defaults to `text`), and optional `outputNodeId`.
 
 ## MCP server
 

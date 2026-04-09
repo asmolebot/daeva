@@ -291,6 +291,255 @@ describe('HttpPodAdapter', () => {
         code: 'COMFY_PROMPT_ID_MISSING'
       });
     });
+
+    it('uses inline request.input.workflow with highest precedence', async () => {
+      // Even though manifest has a workflowPath, the inline workflow should win
+      const manifestWorkflowPath = path.join(tempDir, 'manifest-wf.json');
+      writeFileSync(manifestWorkflowPath, JSON.stringify({
+        '2': { inputs: { text: 'from manifest' }, class_type: 'CLIPTextEncode' },
+        '7': { inputs: { images: ['6', 0] }, class_type: 'SaveImage' }
+      }));
+
+      const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
+        const urlStr = String(url);
+        if (urlStr.endsWith('/prompt')) {
+          const payload = JSON.parse(String(init?.body)) as { prompt: Record<string, { inputs: Record<string, unknown> }> };
+          // Should use inline workflow graph, not the manifest file.
+          // Manifest config promptNodeId='2' applies to the inline graph.
+          expect(payload.prompt['2'].inputs.text).toBe('inline prompt');
+          // The manifest file's node content is NOT loaded — inline graph wins
+          expect(payload.prompt['99']).toBeUndefined();
+          return {
+            ok: true, status: 200, statusText: 'OK',
+            text: async () => JSON.stringify({ prompt_id: 'p-inline' })
+          } as Response;
+        }
+        if (urlStr.includes('/history/p-inline')) {
+          return {
+            ok: true, status: 200, statusText: 'OK',
+            text: async () => JSON.stringify({
+              'p-inline': { outputs: { '11': { images: [{ filename: 'inline.png', subfolder: '', type: 'output' }] } } }
+            })
+          } as Response;
+        }
+        throw new Error(`unexpected url: ${urlStr}`);
+      });
+      globalThis.fetch = fetchMock;
+
+      const adapter = new HttpPodAdapter({ retry: { maxRetries: 0 } });
+      const manifest = makeComfyManifest(manifestWorkflowPath);
+      const result = await adapter.execute(manifest, {
+        type: 'generate-image',
+        input: {
+          prompt: 'inline prompt',
+          workflow: {
+            '2': { inputs: { text: 'old' }, class_type: 'CLIPTextEncode' },
+            '11': { inputs: { images: ['2', 0] }, class_type: 'SaveImage' }
+          }
+        }
+      });
+
+      expect(result.status).toBe('succeeded');
+      expect(result.output.kind).toBe('image-generation');
+    });
+
+    it('resolves request.input.workflowPath (absolute)', async () => {
+      const reqWorkflowPath = path.join(tempDir, 'req-workflow.json');
+      writeFileSync(reqWorkflowPath, JSON.stringify({
+        '6': { inputs: { text: 'old' }, class_type: 'CLIPTextEncode' },
+        '9': { inputs: { images: ['6', 0] }, class_type: 'SaveImage' }
+      }));
+
+      const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
+        const urlStr = String(url);
+        if (urlStr.endsWith('/prompt')) {
+          const payload = JSON.parse(String(init?.body)) as { prompt: Record<string, { inputs: Record<string, unknown> }> };
+          expect(payload.prompt['6'].inputs.text).toBe('path prompt');
+          return {
+            ok: true, status: 200, statusText: 'OK',
+            text: async () => JSON.stringify({ prompt_id: 'p-path' })
+          } as Response;
+        }
+        if (urlStr.includes('/history/p-path')) {
+          return {
+            ok: true, status: 200, statusText: 'OK',
+            text: async () => JSON.stringify({
+              'p-path': { outputs: { '9': { images: [{ filename: 'path.png', subfolder: '', type: 'output' }] } } }
+            })
+          } as Response;
+        }
+        throw new Error(`unexpected url: ${urlStr}`);
+      });
+      globalThis.fetch = fetchMock;
+
+      const adapter = new HttpPodAdapter({ retry: { maxRetries: 0 } });
+      // Use a manifest without workflow metadata — workflowPath in request is the only source
+      const manifest = makeManifest(
+        { baseUrl: 'http://localhost:8188', submitPath: '/prompt', healthPath: '/system_stats', pollingIntervalMs: 10, pollingTimeoutMs: 1000 },
+        { id: 'comfyapi' }
+      );
+      const result = await adapter.execute(manifest, {
+        type: 'generate-image',
+        input: { prompt: 'path prompt', workflowPath: reqWorkflowPath }
+      });
+
+      expect(result.status).toBe('succeeded');
+      expect(result.output.kind).toBe('image-generation');
+    });
+
+    it('resolves request.input.workflowPath relative to PACKAGE_DIR', async () => {
+      const pkgDir = path.join(tempDir, 'pkg');
+      const { mkdirSync } = await import('node:fs');
+      mkdirSync(pkgDir, { recursive: true });
+      writeFileSync(path.join(pkgDir, 'wf.json'), JSON.stringify({
+        '6': { inputs: { text: 'old' }, class_type: 'CLIPTextEncode' },
+        '8': { inputs: { images: ['6', 0] }, class_type: 'SaveImage' }
+      }));
+
+      const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
+        const urlStr = String(url);
+        if (urlStr.endsWith('/prompt')) {
+          const payload = JSON.parse(String(init?.body)) as { prompt: Record<string, { inputs: Record<string, unknown> }> };
+          expect(payload.prompt['6'].inputs.text).toBe('relative prompt');
+          return {
+            ok: true, status: 200, statusText: 'OK',
+            text: async () => JSON.stringify({ prompt_id: 'p-rel' })
+          } as Response;
+        }
+        if (urlStr.includes('/history/p-rel')) {
+          return {
+            ok: true, status: 200, statusText: 'OK',
+            text: async () => JSON.stringify({
+              'p-rel': { outputs: { '8': { images: [{ filename: 'rel.png', subfolder: '', type: 'output' }] } } }
+            })
+          } as Response;
+        }
+        throw new Error(`unexpected url: ${urlStr}`);
+      });
+      globalThis.fetch = fetchMock;
+
+      const adapter = new HttpPodAdapter({ retry: { maxRetries: 0 } });
+      const manifest = makeManifest(
+        { baseUrl: 'http://localhost:8188', submitPath: '/prompt', healthPath: '/system_stats', pollingIntervalMs: 10, pollingTimeoutMs: 1000 },
+        { id: 'comfyapi', metadata: { resolvedTemplateContext: { PACKAGE_DIR: pkgDir } } }
+      );
+      const result = await adapter.execute(manifest, {
+        type: 'generate-image',
+        input: { prompt: 'relative prompt', workflowPath: 'wf.json' }
+      });
+
+      expect(result.status).toBe('succeeded');
+    });
+
+    it('raw prompt without inline workflow falls back to manifest metadata template', async () => {
+      const workflowPath = path.join(tempDir, 'template.json');
+      writeFileSync(workflowPath, JSON.stringify({
+        '2': { inputs: { text: 'template default' }, class_type: 'CLIPTextEncode' },
+        '7': { inputs: { images: ['2', 0] }, class_type: 'SaveImage' }
+      }));
+
+      const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
+        const urlStr = String(url);
+        if (urlStr.endsWith('/prompt')) {
+          const payload = JSON.parse(String(init?.body)) as { prompt: Record<string, { inputs: Record<string, unknown> }> };
+          // raw prompt injected into template node
+          expect(payload.prompt['2'].inputs.text).toBe('just a raw prompt');
+          return {
+            ok: true, status: 200, statusText: 'OK',
+            text: async () => JSON.stringify({ prompt_id: 'p-raw' })
+          } as Response;
+        }
+        if (urlStr.includes('/history/p-raw')) {
+          return {
+            ok: true, status: 200, statusText: 'OK',
+            text: async () => JSON.stringify({
+              'p-raw': { outputs: { '7': { images: [{ filename: 'raw.png', subfolder: '', type: 'output' }] } } }
+            })
+          } as Response;
+        }
+        throw new Error(`unexpected url: ${urlStr}`);
+      });
+      globalThis.fetch = fetchMock;
+
+      const adapter = new HttpPodAdapter({ retry: { maxRetries: 0 } });
+      const result = await adapter.execute(makeComfyManifest(workflowPath), {
+        type: 'generate-image',
+        input: { prompt: 'just a raw prompt' }
+      });
+
+      expect(result.status).toBe('succeeded');
+      expect(result.output.kind).toBe('image-generation');
+    });
+
+    it('fails with clear error when no workflow source can be resolved', async () => {
+      const adapter = new HttpPodAdapter({ retry: { maxRetries: 0 } });
+      // Manifest with /prompt endpoint but no workflow metadata, no request workflow
+      const manifest = makeManifest(
+        { baseUrl: 'http://localhost:8188', submitPath: '/prompt', healthPath: '/system_stats' },
+        { id: 'comfyapi' }
+      );
+      await expect(adapter.execute(manifest, {
+        type: 'generate-image',
+        input: { prompt: 'orphan prompt' }
+      })).rejects.toMatchObject({
+        code: 'COMFY_WORKFLOW_CONFIG_MISSING'
+      });
+    });
+
+    it('fails with clear error when request.workflowPath is relative and no PACKAGE_DIR', async () => {
+      const adapter = new HttpPodAdapter({ retry: { maxRetries: 0 } });
+      const manifest = makeManifest(
+        { baseUrl: 'http://localhost:8188', submitPath: '/prompt', healthPath: '/system_stats' },
+        { id: 'comfyapi' }
+      );
+      await expect(adapter.execute(manifest, {
+        type: 'generate-image',
+        input: { prompt: 'test', workflowPath: 'relative/wf.json' }
+      })).rejects.toMatchObject({
+        code: 'COMFY_WORKFLOW_PATH_UNRESOLVABLE'
+      });
+    });
+
+    it('legacy metadata.workflow path still works', async () => {
+      const workflowPath = path.join(tempDir, 'legacy.json');
+      writeFileSync(workflowPath, JSON.stringify({
+        '2': { inputs: { text: 'placeholder' }, class_type: 'CLIPTextEncode' },
+        '7': { inputs: { images: ['2', 0] }, class_type: 'SaveImage' }
+      }));
+
+      const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
+        const urlStr = String(url);
+        if (urlStr.endsWith('/prompt')) {
+          const payload = JSON.parse(String(init?.body)) as { prompt: Record<string, { inputs: Record<string, unknown> }> };
+          expect(payload.prompt['2'].inputs.text).toBe('legacy test');
+          return {
+            ok: true, status: 200, statusText: 'OK',
+            text: async () => JSON.stringify({ prompt_id: 'p-legacy' })
+          } as Response;
+        }
+        if (urlStr.includes('/history/p-legacy')) {
+          return {
+            ok: true, status: 200, statusText: 'OK',
+            text: async () => JSON.stringify({
+              'p-legacy': { outputs: { '7': { images: [{ filename: 'legacy.png', subfolder: '', type: 'output' }] } } }
+            })
+          } as Response;
+        }
+        throw new Error(`unexpected url: ${urlStr}`);
+      });
+      globalThis.fetch = fetchMock;
+
+      const adapter = new HttpPodAdapter({ retry: { maxRetries: 0 } });
+      const result = await adapter.execute(makeComfyManifest(workflowPath), {
+        type: 'generate-image',
+        input: { prompt: 'legacy test' }
+      });
+
+      expect(result.status).toBe('succeeded');
+      expect(result.output.kind).toBe('image-generation');
+      if (result.output.kind !== 'image-generation') throw new Error('expected image-generation');
+      expect(result.output.generatedImages?.[0]?.url).toContain('/view?filename=legacy.png');
+    });
   });
 
   describe('request timeout', () => {
