@@ -228,3 +228,285 @@ describe('create flow planning', () => {
     expect(planCreateFromAlias(registry, { alias: 'missing' })).toBeUndefined();
   });
 });
+
+const whisperManifestJson = JSON.parse(
+  readFileSync(path.resolve(process.cwd(), 'examples/whisper-pod-package/pod-package.json'), 'utf8')
+);
+
+const makeRemoteRegistryIndex = (entries: Array<{ alias: string; packageName: string; source: Record<string, unknown> }>) => ({
+  schemaVersion: '1' as const,
+  indexType: 'pod-registry-index' as const,
+  name: 'test-remote-registry',
+  entries
+});
+
+const makeMockFetch = (responses: Record<string, { ok: boolean; status: number; body: unknown }>) =>
+  (async (url: string | URL | Request) => {
+    const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
+    const entry = responses[urlStr];
+    if (!entry) {
+      throw new Error(`Network error: unreachable ${urlStr}`);
+    }
+    return {
+      ok: entry.ok,
+      status: entry.status,
+      json: async () => entry.body,
+      headers: new Headers()
+    } as Response;
+  }) as typeof globalThis.fetch;
+
+describe('registry-index delegation (phase 3)', () => {
+  it('materializes a package via registry-index delegation', async () => {
+    const whisperSourcePath = path.resolve(process.cwd(), 'examples/whisper-pod-package');
+    const registry = new PodRegistry([], {
+      registryIndexes: [{
+        schemaVersion: '1',
+        indexType: 'pod-registry-index',
+        name: 'test-local',
+        entries: [{
+          alias: 'remote-whisper',
+          packageName: 'remote-whisper',
+          source: {
+            kind: 'registry-index',
+            indexUrl: 'https://registry.test/index.json',
+            alias: 'whisper-delegated'
+          }
+        }]
+      }]
+    });
+
+    const podController = new PodController([]);
+    const installedPackageStore = new InstalledPackageStore({
+      storageFilePath: path.join(tempRoot, 'ri-installed.json')
+    });
+
+    const mockFetch = makeMockFetch({
+      'https://registry.test/index.json': {
+        ok: true,
+        status: 200,
+        body: makeRemoteRegistryIndex([{
+          alias: 'whisper-delegated',
+          packageName: 'daeva-whisper',
+          source: { kind: 'local-file', path: whisperSourcePath }
+        }])
+      }
+    });
+
+    const result = await createFromAlias(
+      { alias: 'remote-whisper' },
+      {
+        registry,
+        podController,
+        installedPackageStore,
+        projectRoot: process.cwd(),
+        managedPackagesRoot: path.join(tempRoot, 'ri-materialized'),
+        installHookOptions: installHookOptions('home-ri'),
+        fetchFn: mockFetch
+      }
+    );
+
+    expect(result.materialization.status).toBe('installed');
+    if (result.materialization.status !== 'installed') {
+      throw new Error('Expected installed materialization');
+    }
+    expect(result.materialization.installedPackage.packageName).toBe('daeva-whisper');
+    expect(result.materialization.installedPackage.alias).toBe('remote-whisper');
+    expect(installedPackageStore.list()).toHaveLength(1);
+  });
+
+  it('rejects when delegated alias is not found in remote index', async () => {
+    const registry = new PodRegistry([], {
+      registryIndexes: [{
+        schemaVersion: '1',
+        indexType: 'pod-registry-index',
+        name: 'test-local',
+        entries: [{
+          alias: 'missing-remote',
+          packageName: 'missing-remote',
+          source: {
+            kind: 'registry-index',
+            indexUrl: 'https://registry.test/missing.json',
+            alias: 'nonexistent'
+          }
+        }]
+      }]
+    });
+
+    const podController = new PodController([]);
+    const installedPackageStore = new InstalledPackageStore({
+      storageFilePath: path.join(tempRoot, 'ri-missing-installed.json')
+    });
+
+    const whisperSourcePath = path.resolve(process.cwd(), 'examples/whisper-pod-package');
+    const mockFetch = makeMockFetch({
+      'https://registry.test/missing.json': {
+        ok: true,
+        status: 200,
+        body: makeRemoteRegistryIndex([{
+          alias: 'something-else',
+          packageName: 'other',
+          source: { kind: 'local-file', path: whisperSourcePath }
+        }])
+      }
+    });
+
+    await expect(createFromAlias(
+      { alias: 'missing-remote' },
+      {
+        registry,
+        podController,
+        installedPackageStore,
+        managedPackagesRoot: path.join(tempRoot, 'ri-missing-materialized'),
+        installHookOptions: { dryRun: true, skipPodmanSteps: true },
+        fetchFn: mockFetch
+      }
+    )).rejects.toThrow(/not found in registry index/i);
+  });
+
+  it('rejects invalid registry index payload', async () => {
+    const registry = new PodRegistry([], {
+      registryIndexes: [{
+        schemaVersion: '1',
+        indexType: 'pod-registry-index',
+        name: 'test-local',
+        entries: [{
+          alias: 'bad-remote',
+          packageName: 'bad-remote',
+          source: {
+            kind: 'registry-index',
+            indexUrl: 'https://registry.test/bad.json',
+            alias: 'anything'
+          }
+        }]
+      }]
+    });
+
+    const podController = new PodController([]);
+    const installedPackageStore = new InstalledPackageStore({
+      storageFilePath: path.join(tempRoot, 'ri-bad-installed.json')
+    });
+
+    const mockFetch = makeMockFetch({
+      'https://registry.test/bad.json': {
+        ok: true,
+        status: 200,
+        body: { invalid: 'not a registry index' }
+      }
+    });
+
+    await expect(createFromAlias(
+      { alias: 'bad-remote' },
+      {
+        registry,
+        podController,
+        installedPackageStore,
+        managedPackagesRoot: path.join(tempRoot, 'ri-bad-materialized'),
+        installHookOptions: { dryRun: true, skipPodmanSteps: true },
+        fetchFn: mockFetch
+      }
+    )).rejects.toThrow(/invalid schema/i);
+  });
+
+  it('detects recursion loops in registry-index delegation', async () => {
+    const registry = new PodRegistry([], {
+      registryIndexes: [{
+        schemaVersion: '1',
+        indexType: 'pod-registry-index',
+        name: 'test-local',
+        entries: [{
+          alias: 'loop-alias',
+          packageName: 'loop-alias',
+          source: {
+            kind: 'registry-index',
+            indexUrl: 'https://registry.test/loop-a.json',
+            alias: 'hop-a'
+          }
+        }]
+      }]
+    });
+
+    const podController = new PodController([]);
+    const installedPackageStore = new InstalledPackageStore({
+      storageFilePath: path.join(tempRoot, 'ri-loop-installed.json')
+    });
+
+    const mockFetch = makeMockFetch({
+      'https://registry.test/loop-a.json': {
+        ok: true,
+        status: 200,
+        body: makeRemoteRegistryIndex([{
+          alias: 'hop-a',
+          packageName: 'hop-a',
+          source: {
+            kind: 'registry-index',
+            indexUrl: 'https://registry.test/loop-b.json',
+            alias: 'hop-b'
+          }
+        }])
+      },
+      'https://registry.test/loop-b.json': {
+        ok: true,
+        status: 200,
+        body: makeRemoteRegistryIndex([{
+          alias: 'hop-b',
+          packageName: 'hop-b',
+          source: {
+            kind: 'registry-index',
+            indexUrl: 'https://registry.test/loop-a.json',
+            alias: 'hop-a'
+          }
+        }])
+      }
+    });
+
+    await expect(createFromAlias(
+      { alias: 'loop-alias' },
+      {
+        registry,
+        podController,
+        installedPackageStore,
+        managedPackagesRoot: path.join(tempRoot, 'ri-loop-materialized'),
+        installHookOptions: { dryRun: true, skipPodmanSteps: true },
+        fetchFn: mockFetch
+      }
+    )).rejects.toThrow(/loop detected/i);
+  });
+
+  it('rejects when remote index fetch fails with network error', async () => {
+    const registry = new PodRegistry([], {
+      registryIndexes: [{
+        schemaVersion: '1',
+        indexType: 'pod-registry-index',
+        name: 'test-local',
+        entries: [{
+          alias: 'net-fail',
+          packageName: 'net-fail',
+          source: {
+            kind: 'registry-index',
+            indexUrl: 'https://registry.test/unreachable.json',
+            alias: 'any'
+          }
+        }]
+      }]
+    });
+
+    const podController = new PodController([]);
+    const installedPackageStore = new InstalledPackageStore({
+      storageFilePath: path.join(tempRoot, 'ri-netfail-installed.json')
+    });
+
+    const mockFetch = makeMockFetch({});
+
+    await expect(createFromAlias(
+      { alias: 'net-fail' },
+      {
+        registry,
+        podController,
+        installedPackageStore,
+        managedPackagesRoot: path.join(tempRoot, 'ri-netfail-materialized'),
+        installHookOptions: { dryRun: true, skipPodmanSteps: true },
+        fetchFn: mockFetch
+      }
+    )).rejects.toThrow(/failed to fetch registry index/i);
+  });
+});

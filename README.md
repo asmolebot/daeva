@@ -12,7 +12,15 @@ Local GPU pod orchestrator for AI workloads. One process to register, schedule, 
 - **MCP server** — expose orchestrator capabilities to AI coding assistants via `daeva-mcp`
 - **Built-in pods** — bundled compatibility manifests for ComfyUI, Whisper, and OCR/Vision
 
-## Install
+## Setup & Configuration
+
+### Prerequisites
+
+- **Node.js ≥ 20** — required runtime. Install via your system package manager, `nvm`, or `fnm`.
+- **Podman** (recommended) — container engine for running pod services. Docker works but Podman quadlet integration is preferred. GPU workloads require the NVIDIA Container Toolkit (`nvidia-ctk`) configured for your container runtime.
+- **GPU notes** — NVIDIA GPUs need the proprietary driver and `nvidia-container-toolkit`. Verify with `nvidia-smi` and `podman run --device nvidia.com/gpu=all nvidia/cuda:12.6.0-base-ubuntu24.04 nvidia-smi`. AMD ROCm support works via `--device /dev/kfd --device /dev/dri`.
+
+### Install
 
 ```bash
 npm install -g @asmostans/daeva
@@ -27,7 +35,7 @@ npm install
 npm run build
 ```
 
-### Platform installers
+#### Platform installers
 
 Platform-specific install scripts handle Node.js, Podman, and service setup:
 
@@ -44,14 +52,87 @@ irm https://asmo.bot/install-windows.ps1 | iex
 
 All scripts support `--dry-run`, `--skip-podman`, `--skip-service`, and more. Run with `--help` for details.
 
-## Quickstart
+### Server startup
 
-Start the server:
+Start the server with default settings:
 
 ```bash
 daeva
 # Listening on http://127.0.0.1:8787
 ```
+
+Environment variables and CLI flags for configuration:
+
+| Env var    | CLI flag       | Default       | Description          |
+|------------|----------------|---------------|----------------------|
+| `PORT`     | `--port`       | `8787`        | HTTP listen port     |
+| `HOST`     | `--host`       | `0.0.0.0`     | HTTP listen address  |
+| `DATA_DIR` | `--data-dir`   | `.data`       | Data/storage path    |
+
+`DATA_DIR` stores installed packages, the SQLite job database, and the installed-packages index. Set it to a persistent path when running as a service.
+
+### Package install / create flow
+
+Install a built-in package by alias:
+
+```bash
+curl -X POST http://127.0.0.1:8787/pods/create \
+  -H 'Content-Type: application/json' \
+  -d '{"alias": "comfyapi"}'
+```
+
+Install from a Git repo:
+
+```bash
+curl -X POST http://127.0.0.1:8787/pods/create \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "alias": "my-whisper",
+    "source": {
+      "kind": "github-repo",
+      "repo": "owner/whisper-pod-package",
+      "ref": "main",
+      "subpath": "package"
+    }
+  }'
+```
+
+Upload a package archive:
+
+```bash
+curl -X POST http://127.0.0.1:8787/pods/create \
+  -F 'alias=my-pod' \
+  -F 'archive=@my-pod-package.tar.gz'
+```
+
+During install, Daeva copies the package into managed storage (`DATA_DIR/pod-packages/<alias>/`), runs install hooks (directory creation, image pull/build, install commands), registers the pod manifest, and persists metadata including resolved template variables (`MODELS_DIR`, `INPUT_DIR`, etc.).
+
+### Registry-index delegation
+
+A registry alias can delegate to a remote registry index instead of pointing to a concrete source. When you install such an alias, Daeva:
+
+1. Fetches the remote registry index JSON from the configured `indexUrl`.
+2. Looks up the delegated `alias` in the fetched index.
+3. If the delegated entry is another `registry-index`, follows the chain (up to 5 hops max).
+4. Materializes the final concrete source (local-file, github-repo, git-repo, or uploaded-archive) as normal.
+
+Example registry entry with delegation:
+
+```json
+{
+  "alias": "community-whisper",
+  "packageName": "community-whisper",
+  "source": {
+    "kind": "registry-index",
+    "indexUrl": "https://registry.example.com/community/index.json",
+    "alias": "whisper"
+  }
+}
+```
+
+Errors are returned for: network failures fetching the index, invalid index JSON/schema, alias not found in the remote index, and delegation loops or exceeding the 5-hop limit.
+
+## Quickstart
 
 Submit a job:
 
@@ -73,14 +154,6 @@ List pods:
 curl http://127.0.0.1:8787/pods
 ```
 
-Install a pod package:
-
-```bash
-curl -X POST http://127.0.0.1:8787/pods/create \
-  -H 'Content-Type: application/json' \
-  -d '{"alias": "comfyapi"}'
-```
-
 Then point Comfy clients at Daeva's proxy instead of raw port 8188:
 
 ```bash
@@ -90,7 +163,7 @@ curl "$DAEVA_BASE/proxy/comfyapi/system_stats"
 
 For `comfyapi` image jobs, Daeva submits a Comfy workflow payload to `/prompt` and polls `/history/<prompt_id>`.
 
-### Workflow source precedence
+### Workflow configuration for image generation
 
 When submitting an image-generation job to a Comfy pod, the workflow graph is resolved in this order (highest priority first):
 
@@ -101,6 +174,8 @@ When submitting an image-generation job to a Comfy pod, the workflow graph is re
 For raw-prompt requests (only `input.prompt`, no inline workflow), the workflow template is loaded from the highest-priority available source (workflowPath or manifest metadata) and the prompt is injected into the configured prompt node.
 
 Packaged Comfy manifests should provide workflow metadata with `workflowPath` (or `path`), `promptNodeId`, optional `promptInputName` (defaults to `text`), and optional `outputNodeId`.
+
+**Caveats:** If none of the three workflow sources are available, the job will fail with a validation error. Inline `workflow` objects are not validated against ComfyUI's node schema — invalid graphs will fail at the Comfy API level. Template variables (`${PACKAGE_DIR}`, etc.) are expanded in `workflowPath` but not inside inline `workflow` objects.
 
 ## MCP server
 
@@ -118,14 +193,6 @@ Add to your MCP client config:
   "args": ["--base-url", "http://127.0.0.1:8787"]
 }
 ```
-
-## Configuration
-
-| Env var    | CLI flag       | Default       | Description          |
-|------------|----------------|---------------|----------------------|
-| `PORT`     | `--port`       | `8787`        | HTTP listen port     |
-| `HOST`     | `--host`       | `0.0.0.0`     | HTTP listen address  |
-| `DATA_DIR` | `--data-dir`   | `.data`       | Data/storage path    |
 
 ## REST API
 

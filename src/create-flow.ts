@@ -5,8 +5,8 @@ import path from 'node:path';
 
 import { runInstallHooks, type InstallHookOptions } from './install-hooks.js';
 
-import { NotFoundError } from './errors.js';
-import { parsePodPackageManifest } from './manifest-loader.js';
+import { AppError, NotFoundError } from './errors.js';
+import { parsePodPackageManifest, parsePodRegistryIndex } from './manifest-loader.js';
 import type { InstalledPackageStore } from './installed-package-store.js';
 import type { PodController } from './pod-controller.js';
 import type { PodRegistry } from './registry.js';
@@ -15,6 +15,7 @@ import type {
   GitRepoRegistrySource,
   InstalledPackageMetadata,
   LocalFileRegistrySource,
+  PodRegistryIndex,
   PodRegistryIndexEntry,
   RegistryIndexRegistrySource,
   RegistrySource,
@@ -66,7 +67,15 @@ export interface CreateFromAliasOptions {
    * Options forwarded to the install hook runner.
    */
   installHookOptions?: InstallHookOptions;
+  /**
+   * Optional fetch function override for registry-index delegation.
+   * Defaults to globalThis.fetch. Useful for testing.
+   */
+  fetchFn?: typeof globalThis.fetch;
 }
+
+const MAX_REGISTRY_INDEX_HOPS = 5;
+const REGISTRY_INDEX_FETCH_TIMEOUT_MS = 15_000;
 
 const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
 const MAX_EXTRACTED_BYTES = 256 * 1024 * 1024;
@@ -532,6 +541,110 @@ const materializeSource = async (
   }
 };
 
+interface FetchRegistryIndexOptions {
+  fetchFn?: typeof globalThis.fetch;
+}
+
+const fetchRegistryIndex = async (
+  indexUrl: string,
+  options?: FetchRegistryIndexOptions
+): Promise<PodRegistryIndex> => {
+  const doFetch = options?.fetchFn ?? globalThis.fetch;
+  let response: Response;
+  try {
+    response = await doFetch(indexUrl, {
+      signal: AbortSignal.timeout(REGISTRY_INDEX_FETCH_TIMEOUT_MS),
+      headers: { Accept: 'application/json' }
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new AppError(`Failed to fetch registry index from ${indexUrl}: ${message}`, {
+      statusCode: 502,
+      code: 'REGISTRY_INDEX_FETCH_ERROR',
+      type: 'pod-request'
+    });
+  }
+
+  if (!response.ok) {
+    throw new AppError(
+      `Registry index at ${indexUrl} returned HTTP ${response.status}`,
+      { statusCode: 502, code: 'REGISTRY_INDEX_FETCH_ERROR', type: 'pod-request' }
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new AppError(
+      `Registry index at ${indexUrl} returned invalid JSON`,
+      { statusCode: 502, code: 'REGISTRY_INDEX_INVALID', type: 'validation' }
+    );
+  }
+
+  try {
+    return parsePodRegistryIndex(body);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new AppError(
+      `Registry index at ${indexUrl} has invalid schema: ${message}`,
+      { statusCode: 502, code: 'REGISTRY_INDEX_INVALID', type: 'validation' }
+    );
+  }
+};
+
+const resolveRegistryIndexChain = async (
+  source: RegistryIndexRegistrySource,
+  options?: FetchRegistryIndexOptions
+): Promise<{ entry: PodRegistryIndexEntry; concreteSource: Exclude<RegistrySource, RegistryIndexRegistrySource> }> => {
+  const visited = new Set<string>();
+  let currentSource: RegistryIndexRegistrySource = source;
+
+  for (let hop = 0; hop < MAX_REGISTRY_INDEX_HOPS; hop++) {
+    const visitKey = `${currentSource.indexUrl}#${currentSource.alias}`;
+    if (visited.has(visitKey)) {
+      throw new AppError(
+        `Registry index delegation loop detected: ${visitKey} was already visited`,
+        { statusCode: 422, code: 'REGISTRY_INDEX_LOOP', type: 'validation' }
+      );
+    }
+    visited.add(visitKey);
+
+    const index = await fetchRegistryIndex(currentSource.indexUrl, options);
+    const delegatedEntry = index.entries.find((e) => e.alias === currentSource.alias);
+
+    if (!delegatedEntry) {
+      throw new AppError(
+        `Alias "${currentSource.alias}" not found in registry index at ${currentSource.indexUrl}`,
+        { statusCode: 404, code: 'REGISTRY_INDEX_ALIAS_NOT_FOUND', type: 'not-found' }
+      );
+    }
+
+    if (delegatedEntry.source.kind !== 'registry-index') {
+      return {
+        entry: delegatedEntry,
+        concreteSource: delegatedEntry.source as Exclude<RegistrySource, RegistryIndexRegistrySource>
+      };
+    }
+
+    currentSource = delegatedEntry.source;
+  }
+
+  throw new AppError(
+    `Registry index delegation exceeded maximum of ${MAX_REGISTRY_INDEX_HOPS} hops`,
+    { statusCode: 422, code: 'REGISTRY_INDEX_TOO_MANY_HOPS', type: 'validation' }
+  );
+};
+
+const materializeRegistryIndexSource = async (
+  registryEntry: PodRegistryIndexEntry,
+  source: RegistryIndexRegistrySource,
+  options: CreateFromAliasOptions & FetchRegistryIndexOptions
+): Promise<MaterializedPodCreatePlan> => {
+  const { concreteSource } = await resolveRegistryIndexChain(source, options);
+  return materializeSource(registryEntry, concreteSource, options);
+};
+
 const resolveRequestToEntry = (request: PodCreateRequest, registry: PodRegistry): PodRegistryIndexEntry | undefined => {
   if (request.source) {
     const alias = request.alias ?? deriveAliasFromSource(request.source);
@@ -553,11 +666,7 @@ export const createFromAlias = async (request: PodCreateRequest, options: Create
   }
 
   const materialization = registryEntry.source.kind === 'registry-index'
-    ? {
-        status: 'resolved' as const,
-        summary: 'Alias resolved successfully; package fetch/install is the next Phase 3 step.',
-        nextAction: describeSource(registryEntry.source)
-      }
+    ? await materializeRegistryIndexSource(registryEntry, registryEntry.source, options)
     : await materializeSource(registryEntry, registryEntry.source, options);
 
   return {

@@ -288,7 +288,7 @@ describe('HTTP API', () => {
     expect(installedBody.packages.map((pkg: { alias: string }) => pkg.alias)).toEqual(['archive-whisper', 'git-whisper', 'whisper']);
   });
 
-  it('resolves a named registry-index alias through POST /pods/create without materializing it yet', async () => {
+  it('returns an error when registry-index delegation cannot reach the remote index', async () => {
     const response = await app.inject({
       method: 'POST',
       url: '/pods/create',
@@ -297,13 +297,11 @@ describe('HTTP API', () => {
       }
     });
 
-    expect(response.statusCode).toBe(202);
+    expect(response.statusCode).toBe(502);
     const body = response.json();
 
-    expect(body.create.alias).toBe('vision');
-    expect(body.create.resolvedSource.kind).toBe('registry-index');
-    expect(body.create.materialization.status).toBe('resolved');
-    expect(body.create.materialization.nextAction).toContain('Fetch registry index');
+    expect(body.error.code).toBe('REGISTRY_INDEX_FETCH_ERROR');
+    expect(body.error.message).toContain('registry.asmo.local');
   });
 
   it('returns a useful 404 when POST /pods/create receives an unknown alias', async () => {
