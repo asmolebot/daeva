@@ -330,7 +330,14 @@ export const installedPackageMetadataSchema = z.object({
   sourcePath: z.string().min(1),
   packageManifestPath: z.string().min(1),
   materializedPath: z.string().min(1),
-  manifest: podPackageManifestSchema
+  manifest: podPackageManifestSchema,
+  resolvedTemplateContext: z.record(z.string()).optional(),
+  resolvedDirectories: z.array(z.object({
+    path: z.string().min(1),
+    purpose: z.enum(['config', 'data', 'models', 'input', 'output', 'cache', 'workspace', 'custom']),
+    description: z.string().min(1).optional(),
+    templateVars: z.array(z.string().min(1))
+  })).optional()
 });
 
 export const installedPackageMetadataCollectionSchema = z.object({

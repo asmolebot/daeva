@@ -1,7 +1,7 @@
 {
   "name": "@asmostans/daeva",
-  "version": "0.2.3",
-  "description": "Daeva — local GPU pod orchestrator for AI workloads",
+  "version": "0.2.4",
+  "description": "Daeva \u2014 local GPU pod orchestrator for AI workloads",
   "type": "module",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",

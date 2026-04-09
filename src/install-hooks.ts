@@ -22,13 +22,13 @@
  * requirement — errors there propagate to the caller.
  */
 
-import { mkdirSync } from 'node:fs';
+import { accessSync, constants, mkdirSync } from 'node:fs';
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
 
-import type { PodPackageManifest } from './types.js';
-import { applyTemplate, applyTemplateToCommand, applyTemplateToEnv, applyTemplateToPath, buildContext, type TemplateContext } from './path-template.js';
+import type { InstalledPackageResolvedDirectory, PodPackageManifest } from './types.js';
+import { applyTemplate, applyTemplateToCommand, applyTemplateToEnv, applyTemplateToPath, buildPackageTemplateContext, type TemplateContext } from './path-template.js';
 
 const exec = promisify(execCb);
 
@@ -71,6 +71,8 @@ export interface InstallHookResult {
   steps: InstallHookStep[];
   /** True when all required steps succeeded (warnings/skips don't fail this). */
   ok: boolean;
+  templateContext: Record<string, string>;
+  resolvedDirectories: InstalledPackageResolvedDirectory[];
 }
 
 // ---------------------------------------------------------------------------
@@ -202,18 +204,31 @@ const podmanBuildStep = async (tag: string, packageDir: string, dryRun: boolean)
   }
 };
 
+const normalizeShellCommand = (command: string): string => {
+  const trimmed = command.trim();
+  if (!trimmed || /\s/.test(trimmed)) return command;
+  if (!trimmed.endsWith('.sh')) return command;
+  try {
+    accessSync(trimmed, constants.X_OK);
+    return command;
+  } catch {
+    return `sh ${JSON.stringify(trimmed)}`;
+  }
+};
+
 const installCommandStep = async (
   command: string,
   cwd: string | undefined,
   env: Record<string, string> | undefined,
   dryRun: boolean
 ): Promise<InstallHookStep> => {
-  const description = `install command: ${command.slice(0, 120)}${command.length > 120 ? '…' : ''}`;
+  const normalizedCommand = normalizeShellCommand(command);
+  const description = `install command: ${normalizedCommand.slice(0, 120)}${normalizedCommand.length > 120 ? '…' : ''}`;
   if (dryRun) {
     return { kind: 'install-command', description, status: 'skipped', detail: 'dry-run' };
   }
   try {
-    const { stdout, stderr } = await exec(command, {
+    const { stdout, stderr } = await exec(normalizedCommand, {
       cwd,
       env: env ? { ...process.env, ...env } : process.env
     });
@@ -248,22 +263,31 @@ export async function runInstallHooks(
   options: InstallHookOptions = {}
 ): Promise<InstallHookResult> {
   const { dryRun = false, skipPodmanSteps = false } = options;
-  const ctx = buildContext({
-    PACKAGE_DIR: packagePath,
-    POD_ID: manifest.pod.id,
-    ...options.templateContext
-  });
+  const ctx = buildPackageTemplateContext(manifest, packagePath, options.templateContext);
 
   const steps: InstallHookStep[] = [];
+  const resolvedDirectories: InstalledPackageResolvedDirectory[] = [];
 
   // -----------------------------------------------------------------------
   // 1. Create directories
   // -----------------------------------------------------------------------
-  for (const dir of manifest.directories ?? []) {
-    if (!dir.createIfMissing) continue;
+  for (const [index, dir] of (manifest.directories ?? []).entries()) {
     const resolved = applyTemplateToPath(dir.path, ctx);
-    // Ensure absolute paths remain unchanged; relative ones become absolute
     const abs = path.isAbsolute(resolved) ? resolved : path.resolve(packagePath, resolved);
+    const templateVars = [
+      `HOST_DIR_${index + 1}`,
+      `${dir.purpose.replace(/[^A-Za-z0-9]+/g, '_').toUpperCase()}_DIR`,
+      `HOST_${dir.purpose.replace(/[^A-Za-z0-9]+/g, '_').toUpperCase()}_DIR`
+    ].filter((value, position, all) => all.indexOf(value) === position);
+
+    resolvedDirectories.push({
+      path: abs,
+      purpose: dir.purpose,
+      description: dir.description,
+      templateVars
+    });
+
+    if (!dir.createIfMissing) continue;
     if (dryRun) {
       steps.push({
         kind: 'mkdir',
@@ -310,14 +334,21 @@ export async function runInstallHooks(
   }
 
   const ok = steps.every((s) => s.status !== 'error');
-  return { steps, ok };
+  return {
+    steps,
+    ok,
+    templateContext: Object.fromEntries(
+      Object.entries(ctx).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    ),
+    resolvedDirectories
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Helper: describe what install hooks would do (for dry-run summaries)
 // ---------------------------------------------------------------------------
 export function describeInstallHooks(manifest: PodPackageManifest, packagePath: string): string[] {
-  const ctx = buildContext({ PACKAGE_DIR: packagePath, POD_ID: manifest.pod.id });
+  const ctx = buildPackageTemplateContext(manifest, packagePath);
   const lines: string[] = [];
 
   for (const dir of manifest.directories ?? []) {

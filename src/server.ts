@@ -42,6 +42,7 @@ export interface AppDependencies {
   rateLimit?: { max?: number; windowMs?: number };
   /** Maximum upload size in bytes for multipart archive uploads (default: 50 MiB). */
   uploadMaxBytes?: number;
+  installHookOptions?: { dryRun?: boolean; skipPodmanSteps?: boolean; templateContext?: Record<string, string> };
 }
 
 export const buildApp = async (dependencies: AppDependencies = {}) => {
@@ -50,6 +51,12 @@ export const buildApp = async (dependencies: AppDependencies = {}) => {
   const router = dependencies.router ?? new SchedulerRouter(registry, podController);
   const jobManager = dependencies.jobManager ?? new JobManager(registry, podController, router);
   const installedPackageStore = dependencies.installedPackageStore ?? new InstalledPackageStore();
+  for (const installedPackage of installedPackageStore.list()) {
+    if (!registry.get(installedPackage.manifest.pod.id)) {
+      registry.register(installedPackage.manifest.pod);
+    }
+    podController.syncManifest(installedPackage.manifest.pod, installedPackage.resolvedTemplateContext);
+  }
 
   const uploadMaxBytes = dependencies.uploadMaxBytes ?? DEFAULT_UPLOAD_MAX_BYTES;
   const app = Fastify({ logger: false });
@@ -155,12 +162,13 @@ export const buildApp = async (dependencies: AppDependencies = {}) => {
 
       // Run create flow, then clean up temp archive
       try {
-        const plan = createFromAlias(payload, {
+        const plan = await createFromAlias(payload, {
           registry,
           podController,
           installedPackageStore,
           projectRoot: dependencies.projectRoot,
-          managedPackagesRoot: dependencies.managedPackagesRoot
+          managedPackagesRoot: dependencies.managedPackagesRoot,
+          installHookOptions: dependencies.installHookOptions
         });
 
         reply.code(plan.materialization.status === 'installed' ? 201 : 202);
@@ -197,12 +205,13 @@ export const buildApp = async (dependencies: AppDependencies = {}) => {
     payload = podCreateRequestSchema.parse(request.body);
 
     try {
-      const plan = createFromAlias(payload, {
+      const plan = await createFromAlias(payload, {
         registry,
         podController,
         installedPackageStore,
         projectRoot: dependencies.projectRoot,
-        managedPackagesRoot: dependencies.managedPackagesRoot
+        managedPackagesRoot: dependencies.managedPackagesRoot,
+        installHookOptions: dependencies.installHookOptions
       });
 
       reply.code(plan.materialization.status === 'installed' ? 201 : 202);
@@ -236,6 +245,39 @@ export const buildApp = async (dependencies: AppDependencies = {}) => {
 
   app.get('/pods/aliases', async () => ({ aliases: registry.listAliases() }));
   app.get('/pods/installed', async () => ({ packages: installedPackageStore.list() }));
+
+  app.post('/pods/:podId/activate', async (request) => {
+    const params = request.params as { podId: string };
+    const pod = registry.get(params.podId);
+    if (!pod) {
+      throw new NotFoundError(`Unknown pod: ${params.podId}`);
+    }
+    await podController.activate(pod, registry.list());
+    return { podId: pod.id, status: podController.getStatus(pod.id) };
+  });
+
+  app.post('/pods/:podId/stop', async (request) => {
+    const params = request.params as { podId: string };
+    const pod = registry.get(params.podId);
+    if (!pod) {
+      throw new NotFoundError(`Unknown pod: ${params.podId}`);
+    }
+    await podController.stop(pod);
+    return { podId: pod.id, status: podController.getStatus(pod.id) };
+  });
+
+  app.post('/pods/swap', async (request) => {
+    const body = request.body as { podId?: string };
+    if (!body?.podId) {
+      throw new AppError('podId is required', { statusCode: 400, code: 'REQUEST_VALIDATION_ERROR', type: 'validation', retriable: false });
+    }
+    const pod = registry.get(body.podId);
+    if (!pod) {
+      throw new NotFoundError(`Unknown pod: ${body.podId}`);
+    }
+    await podController.swap(pod, registry.list());
+    return { podId: pod.id, status: podController.getStatus(pod.id) };
+  });
 
   app.get('/status', async () =>
     buildStatusSnapshot(registry, podController, jobManager, installedPackageStore, dependencies.runtimeInspector)

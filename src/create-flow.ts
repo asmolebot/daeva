@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 
-import { describeInstallHooks, runInstallHooks, type InstallHookOptions } from './install-hooks.js';
+import { runInstallHooks, type InstallHookOptions } from './install-hooks.js';
 
 import { NotFoundError } from './errors.js';
 import { parsePodPackageManifest } from './manifest-loader.js';
@@ -58,15 +58,14 @@ export interface CreateFromAliasOptions {
   projectRoot?: string;
   managedPackagesRoot?: string;
   /**
-   * When true (default: false), automatically run install hooks (directory
-   * creation, podman pull/build, install lifecycle command) after materializing
-   * a package.  Hooks run with dryRun=false.
+   * Reserved for future opt-out behavior. Install hooks currently run as part of
+   * package materialization so resolved host paths are persisted consistently.
    */
   runInstallHooks?: boolean;
   /**
-   * Options forwarded to the install hook runner when runInstallHooks is true.
+   * Options forwarded to the install hook runner.
    */
-  installHookOptions?: Omit<InstallHookOptions, 'templateContext'>;
+  installHookOptions?: InstallHookOptions;
 }
 
 const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
@@ -166,7 +165,7 @@ const resolveLocalSourcePaths = (projectRoot: string, source: LocalFileRegistryS
 const getManagedPackagesRoot = (options: CreateFromAliasOptions) =>
   options.managedPackagesRoot ?? path.resolve(options.projectRoot ?? process.cwd(), '.data/pod-packages');
 
-const persistInstalledPackage = (
+const persistInstalledPackage = async (
   registryEntry: PodRegistryIndexEntry,
   manifest: ReturnType<typeof parsePodPackageManifest>,
   source: RegistrySource,
@@ -174,9 +173,14 @@ const persistInstalledPackage = (
   packageManifestPath: string,
   materializedPath: string,
   options: CreateFromAliasOptions,
-  summaryPrefix: string,
-  installHookSteps?: string[]
-): MaterializedPodCreatePlan => {
+  summaryPrefix: string
+): Promise<MaterializedPodCreatePlan> => {
+  const hookResult = await runInstallHooks(manifest, materializedPath, {
+    ...options.installHookOptions,
+    dryRun: options.installHookOptions?.dryRun ?? false,
+    skipPodmanSteps: options.installHookOptions?.skipPodmanSteps ?? false
+  });
+
   const installedPackage: InstalledPackageMetadata = {
     alias: registryEntry.alias,
     packageName: manifest.name,
@@ -187,28 +191,30 @@ const persistInstalledPackage = (
     sourcePath,
     packageManifestPath,
     materializedPath,
-    manifest
+    manifest,
+    resolvedTemplateContext: hookResult.templateContext,
+    resolvedDirectories: hookResult.resolvedDirectories
   };
 
   if (!options.registry.get(manifest.pod.id)) {
     options.registry.register(manifest.pod);
-    options.podController.syncManifest(manifest.pod);
   }
+  options.podController.syncManifest(manifest.pod, hookResult.templateContext);
   options.installedPackageStore.upsert(installedPackage);
 
   return {
     status: 'installed',
     summary: `${summaryPrefix} ${manifest.name}@${manifest.version} for alias ${registryEntry.alias}.`,
     installedPackage,
-    installHookSteps
+    installHookSteps: hookResult.steps.map((step) => `${step.status}: ${step.description}${step.detail ? ` (${step.detail})` : ''}`)
   };
 };
 
-const materializeLocalFilePackage = (
+const materializeLocalFilePackage = async (
   registryEntry: PodRegistryIndexEntry,
   source: LocalFileRegistrySource,
   options: CreateFromAliasOptions
-): MaterializedPodCreatePlan => {
+): Promise<MaterializedPodCreatePlan> => {
   const projectRoot = options.projectRoot ?? process.cwd();
   const managedPackagesRoot = getManagedPackagesRoot(options);
   const { sourcePath, packageManifestPath } = resolveLocalSourcePaths(projectRoot, source);
@@ -218,8 +224,6 @@ const materializeLocalFilePackage = (
   mkdirSync(managedPackagesRoot, { recursive: true });
   cpSync(sourcePath, managedAliasPath, { recursive: true, force: true });
 
-  const hookSteps = describeInstallHooks(manifest, managedAliasPath);
-
   return persistInstalledPackage(
     registryEntry,
     manifest,
@@ -228,8 +232,7 @@ const materializeLocalFilePackage = (
     packageManifestPath,
     managedAliasPath,
     options,
-    'Installed local package',
-    hookSteps.length > 0 ? hookSteps : undefined
+    'Installed local package'
   );
 };
 
@@ -253,11 +256,11 @@ const deriveAliasFromSource = (source: Exclude<RegistrySource, RegistryIndexRegi
   return path.basename(source.path);
 };
 
-const cloneAndMaterializeGitPackage = (
+const cloneAndMaterializeGitPackage = async (
   registryEntry: PodRegistryIndexEntry,
   source: GithubRepoRegistrySource | GitRepoRegistrySource,
   options: CreateFromAliasOptions
-): MaterializedPodCreatePlan => {
+): Promise<MaterializedPodCreatePlan> => {
   const managedPackagesRoot = getManagedPackagesRoot(options);
   const cloneUrl = source.kind === 'github-repo' ? toGithubCloneUrl(source) : source.repoUrl;
   const checkoutRoot = mkdtempSync(path.join(os.tmpdir(), 'asmo-pod-git-checkout-'));
@@ -283,8 +286,6 @@ const cloneAndMaterializeGitPackage = (
       ? safeJoinWithin(managedAliasPath, source.packageManifestPath, 'source.packageManifestPath')
       : path.join(managedAliasPath, 'pod-package.json');
 
-    const hookSteps = describeInstallHooks(manifest, managedAliasPath);
-
     return persistInstalledPackage(
       registryEntry,
       manifest,
@@ -293,8 +294,7 @@ const cloneAndMaterializeGitPackage = (
       materializedManifestPath,
       managedAliasPath,
       options,
-      source.kind === 'github-repo' ? 'Installed GitHub package' : 'Installed Git package',
-      hookSteps.length > 0 ? hookSteps : undefined
+      source.kind === 'github-repo' ? 'Installed GitHub package' : 'Installed Git package'
     );
   } finally {
     rmSync(checkoutRoot, { recursive: true, force: true });
@@ -437,11 +437,11 @@ const inspectExtractedTree = (root: string) => {
   walk(root);
 };
 
-const materializeUploadedArchivePackage = (
+const materializeUploadedArchivePackage = async (
   registryEntry: PodRegistryIndexEntry,
   source: UploadedArchiveRegistrySource,
   options: CreateFromAliasOptions
-): MaterializedPodCreatePlan => {
+): Promise<MaterializedPodCreatePlan> => {
   const managedPackagesRoot = getManagedPackagesRoot(options);
   const unpackRoot = mkdtempSync(path.join(os.tmpdir(), 'asmo-pod-upload-'));
   const archivePath = path.join(unpackRoot, path.basename(source.filename));
@@ -470,8 +470,6 @@ const materializeUploadedArchivePackage = (
       ? safeJoinWithin(managedAliasPath, source.packageManifestPath, 'source.packageManifestPath')
       : path.join(managedAliasPath, 'pod-package.json');
 
-    const hookSteps = describeInstallHooks(manifest, managedAliasPath);
-
     return persistInstalledPackage(
       registryEntry,
       manifest,
@@ -480,19 +478,18 @@ const materializeUploadedArchivePackage = (
       materializedManifestPath,
       managedAliasPath,
       options,
-      'Installed uploaded archive package',
-      hookSteps.length > 0 ? hookSteps : undefined
+      'Installed uploaded archive package'
     );
   } finally {
     rmSync(unpackRoot, { recursive: true, force: true });
   }
 };
 
-const materializeSource = (
+const materializeSource = async (
   registryEntry: PodRegistryIndexEntry,
   source: Exclude<RegistrySource, RegistryIndexRegistrySource>,
   options: CreateFromAliasOptions
-): MaterializedPodCreatePlan => {
+): Promise<MaterializedPodCreatePlan> => {
   switch (source.kind) {
     case 'local-file':
       return materializeLocalFilePackage(registryEntry, source, options);
@@ -517,7 +514,7 @@ const resolveRequestToEntry = (request: PodCreateRequest, registry: PodRegistry)
   return request.alias ? registry.resolveAlias(request.alias) : undefined;
 };
 
-export const createFromAlias = (request: PodCreateRequest, options: CreateFromAliasOptions): PodCreatePlan => {
+export const createFromAlias = async (request: PodCreateRequest, options: CreateFromAliasOptions): Promise<PodCreatePlan> => {
   const registryEntry = resolveRequestToEntry(request, options.registry);
 
   if (!registryEntry) {
@@ -530,7 +527,7 @@ export const createFromAlias = (request: PodCreateRequest, options: CreateFromAl
         summary: 'Alias resolved successfully; package fetch/install is the next Phase 3 step.',
         nextAction: describeSource(registryEntry.source)
       }
-    : materializeSource(registryEntry, registryEntry.source, options);
+    : await materializeSource(registryEntry, registryEntry.source, options);
 
   return {
     request,

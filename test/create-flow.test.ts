@@ -37,6 +37,12 @@ const traversalArchivePath = path.join(tempRoot, 'evil.tar');
 execFileSync('tar', ['-cf', traversalArchivePath, '-C', traversalArchiveRoot, '--transform=s|pod-package.json|../escape/pod-package.json|', 'pod-package.json'], { stdio: 'pipe' });
 const traversalArchiveBase64 = readFileSync(traversalArchivePath).toString('base64');
 
+const installHookOptions = (homeSuffix: string) => ({
+  dryRun: true,
+  skipPodmanSteps: true,
+  templateContext: { HOME: path.join(tempRoot, homeSuffix) }
+});
+
 afterAll(() => {
   rmSync(tempRoot, { recursive: true, force: true });
 });
@@ -55,21 +61,22 @@ describe('create flow planning', () => {
     expect(plan.materialization.nextAction).toContain('Validate local package content');
   });
 
-  it('materializes a local-file package and persists installed metadata', () => {
+  it('materializes a local-file package and persists installed metadata', async () => {
     const registry = new PodRegistry();
     const podController = new PodController(registry.list());
     const installedPackageStore = new InstalledPackageStore({
       storageFilePath: path.join(tempRoot, 'installed-packages.json')
     });
 
-    const result = createFromAlias(
+    const result = await createFromAlias(
       { alias: 'whisper' },
       {
         registry,
         podController,
         installedPackageStore,
         projectRoot: process.cwd(),
-        managedPackagesRoot: path.join(tempRoot, 'materialized')
+        managedPackagesRoot: path.join(tempRoot, 'materialized'),
+        installHookOptions: installHookOptions('home-local')
       }
     );
 
@@ -79,18 +86,20 @@ describe('create flow planning', () => {
     }
 
     expect(result.materialization.installedPackage.packageName).toBe('daeva-whisper');
+    expect(result.materialization.installedPackage.resolvedDirectories?.[0]?.templateVars).toContain('MODELS_DIR');
+    expect(result.materialization.installedPackage.resolvedTemplateContext?.MODELS_DIR).toContain('home-local');
     expect(installedPackageStore.list()).toHaveLength(1);
     expect(installedPackageStore.list()[0].manifest.pod.id).toBe('whisper');
   });
 
-  it('materializes a direct git-repo source request into managed storage', () => {
+  it('materializes a direct git-repo source request into managed storage', async () => {
     const registry = new PodRegistry();
     const podController = new PodController(registry.list());
     const installedPackageStore = new InstalledPackageStore({
       storageFilePath: path.join(tempRoot, 'git-installed-packages.json')
     });
 
-    const result = createFromAlias(
+    const result = await createFromAlias(
       {
         alias: 'git-whisper',
         source: {
@@ -104,7 +113,8 @@ describe('create flow planning', () => {
         registry,
         podController,
         installedPackageStore,
-        managedPackagesRoot: path.join(tempRoot, 'git-materialized')
+        managedPackagesRoot: path.join(tempRoot, 'git-materialized'),
+        installHookOptions: installHookOptions('home-git')
       }
     );
 
@@ -120,14 +130,14 @@ describe('create flow planning', () => {
     expect(installedPackageStore.list()).toHaveLength(1);
   });
 
-  it('materializes a direct uploaded-archive source request into managed storage', () => {
+  it('materializes a direct uploaded-archive source request into managed storage', async () => {
     const registry = new PodRegistry();
     const podController = new PodController(registry.list());
     const installedPackageStore = new InstalledPackageStore({
       storageFilePath: path.join(tempRoot, 'archive-installed-packages.json')
     });
 
-    const result = createFromAlias(
+    const result = await createFromAlias(
       {
         alias: 'archive-whisper',
         source: {
@@ -142,7 +152,8 @@ describe('create flow planning', () => {
         registry,
         podController,
         installedPackageStore,
-        managedPackagesRoot: path.join(tempRoot, 'archive-materialized')
+        managedPackagesRoot: path.join(tempRoot, 'archive-materialized'),
+        installHookOptions: installHookOptions('home-archive')
       }
     );
 
@@ -158,14 +169,14 @@ describe('create flow planning', () => {
     expect(installedPackageStore.list()).toHaveLength(1);
   });
 
-  it('rejects uploaded archive path traversal entries before extraction', () => {
+  it('rejects uploaded archive path traversal entries before extraction', async () => {
     const registry = new PodRegistry();
     const podController = new PodController(registry.list());
     const installedPackageStore = new InstalledPackageStore({
       storageFilePath: path.join(tempRoot, 'bad-archive-installed-packages.json')
     });
 
-    expect(() => createFromAlias(
+    await expect(createFromAlias(
       {
         alias: 'bad-archive',
         source: {
@@ -178,19 +189,20 @@ describe('create flow planning', () => {
         registry,
         podController,
         installedPackageStore,
-        managedPackagesRoot: path.join(tempRoot, 'bad-archive-materialized')
+        managedPackagesRoot: path.join(tempRoot, 'bad-archive-materialized'),
+        installHookOptions: { dryRun: true, skipPodmanSteps: true }
       }
-    )).toThrow(/path traversal/i);
+    )).rejects.toThrow(/path traversal/i);
   });
 
-  it('rejects uploaded archive subpaths that attempt to escape the extracted root', () => {
+  it('rejects uploaded archive subpaths that attempt to escape the extracted root', async () => {
     const registry = new PodRegistry();
     const podController = new PodController(registry.list());
     const installedPackageStore = new InstalledPackageStore({
       storageFilePath: path.join(tempRoot, 'bad-subpath-installed-packages.json')
     });
 
-    expect(() => createFromAlias(
+    await expect(createFromAlias(
       {
         alias: 'bad-subpath',
         source: {
@@ -205,9 +217,10 @@ describe('create flow planning', () => {
         registry,
         podController,
         installedPackageStore,
-        managedPackagesRoot: path.join(tempRoot, 'bad-subpath-materialized')
+        managedPackagesRoot: path.join(tempRoot, 'bad-subpath-materialized'),
+        installHookOptions: { dryRun: true, skipPodmanSteps: true }
       }
-    )).toThrow(/package root/i);
+    )).rejects.toThrow(/package root/i);
   });
 
   it('returns undefined for an unknown alias when only planning', () => {

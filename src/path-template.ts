@@ -19,6 +19,8 @@
 import os from 'node:os';
 import path from 'node:path';
 
+import type { PodPackageManifest } from './types.js';
+
 export interface TemplateContext {
   /** User's home directory. Defaults to os.homedir(). */
   HOME?: string;
@@ -114,4 +116,36 @@ export function applyTemplateToPath(hostPath: string, context: TemplateContext):
   }
   const packageDir = context.PACKAGE_DIR;
   return packageDir ? path.resolve(packageDir, substituted) : substituted;
+}
+
+const directoryPurposeVar = (purpose: string) => `${purpose.replace(/[^A-Za-z0-9]+/g, '_').toUpperCase()}_DIR`;
+
+export function buildPackageTemplateContext(
+  manifest: PodPackageManifest,
+  packageDir: string,
+  overrides: TemplateContext = {}
+): TemplateContext {
+  const ctx = buildContext({
+    PACKAGE_DIR: packageDir,
+    POD_ID: manifest.pod.id,
+    ...overrides
+  });
+
+  (manifest.directories ?? []).forEach((directory, index) => {
+    const resolvedPath = applyTemplateToPath(directory.path, ctx);
+    const vars = [
+      `HOST_DIR_${index + 1}`,
+      directoryPurposeVar(directory.purpose),
+      `HOST_${directoryPurposeVar(directory.purpose)}`
+    ];
+
+    ctx[vars[0]] = resolvedPath;
+    for (const variable of vars.slice(1)) {
+      if (!ctx[variable]) {
+        ctx[variable] = resolvedPath;
+      }
+    }
+  });
+
+  return ctx;
 }

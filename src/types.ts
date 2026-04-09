@@ -168,7 +168,7 @@ export interface PodPackageManifest {
   };
   directories?: Array<{
     path: string;
-    purpose: 'config' | 'data' | 'models' | 'input' | 'output' | 'cache' | 'workspace' | 'custom';
+    purpose: PodPackageDirectoryPurpose;
     required?: boolean;
     createIfMissing?: boolean;
     description?: string;
@@ -307,6 +307,15 @@ export interface PodRegistryIndex {
   entries: PodRegistryIndexEntry[];
 }
 
+export type PodPackageDirectoryPurpose = 'config' | 'data' | 'models' | 'input' | 'output' | 'cache' | 'workspace' | 'custom';
+
+export interface InstalledPackageResolvedDirectory {
+  path: string;
+  purpose: PodPackageDirectoryPurpose;
+  description?: string;
+  templateVars: string[];
+}
+
 export interface InstalledPackageMetadata {
   alias: string;
   packageName: string;
@@ -318,6 +327,8 @@ export interface InstalledPackageMetadata {
   packageManifestPath: string;
   materializedPath: string;
   manifest: PodPackageManifest;
+  resolvedTemplateContext?: Record<string, string>;
+  resolvedDirectories?: InstalledPackageResolvedDirectory[];
 }
 
 export interface InstalledPackageMetadataCollection {

@@ -118,6 +118,9 @@ Add to your MCP client config:
 | POST   | `/pods/create`            | Install a pod package by alias       |
 | GET    | `/pods/aliases`           | List registry aliases                |
 | GET    | `/pods/installed`         | List installed packages              |
+| POST   | `/pods/:podId/activate`   | Start or activate a pod explicitly   |
+| POST   | `/pods/:podId/stop`       | Stop a pod explicitly                |
+| POST   | `/pods/swap`              | Swap to a target pod server-side     |
 | POST   | `/jobs`                   | Submit an async job                  |
 | GET    | `/jobs`                   | List jobs                            |
 | GET    | `/jobs/:id`               | Get job state                        |
@@ -169,6 +172,8 @@ Packages can be installed from:
 - **git-repo** — arbitrary Git URL
 - **uploaded-archive** — `.tar.gz` or `.zip` uploaded directly
 - **registry-index** — delegated lookup from a registry catalog
+
+During install, Daeva now runs package install hooks, creates declared host directories, and persists resolved host-path template variables (for example `MODELS_DIR`, `INPUT_DIR`, `HOST_DIR_1`) alongside installed package metadata.
 
 ## Built-in pods
 

@@ -8,7 +8,8 @@ import {
   applyTemplateToCommand,
   applyTemplateToEnv,
   applyTemplateToPath,
-  buildContext
+  buildContext,
+  buildPackageTemplateContext
 } from '../src/path-template.js';
 
 describe('buildContext', () => {
@@ -33,6 +34,36 @@ describe('buildContext', () => {
   it('passes through arbitrary extra keys', () => {
     const ctx = buildContext({ MY_CUSTOM_VAR: 'hello' });
     expect(ctx.MY_CUSTOM_VAR).toBe('hello');
+  });
+
+  it('derives stable directory aliases for package manifests', () => {
+    const ctx = buildPackageTemplateContext({
+      schemaVersion: '1',
+      packageType: 'pod-package',
+      name: 'pkg',
+      version: '1.0.0',
+      pod: {
+        id: 'demo',
+        nickname: 'Demo',
+        description: 'desc',
+        capabilities: ['speech-to-text'],
+        source: {},
+        runtime: {
+          kind: 'http-service',
+          baseUrl: 'http://127.0.0.1:9999',
+          submitPath: '/run'
+        }
+      },
+      directories: [
+        { path: '${HOME}/models', purpose: 'models' },
+        { path: 'data/input', purpose: 'input' }
+      ]
+    }, '/pkg', { HOME: '/tmp/home' });
+
+    expect(ctx.MODELS_DIR).toBe('/tmp/home/models');
+    expect(ctx.HOST_MODELS_DIR).toBe('/tmp/home/models');
+    expect(ctx.INPUT_DIR).toBe('/pkg/data/input');
+    expect(ctx.HOST_DIR_2).toBe('/pkg/data/input');
   });
 });
 

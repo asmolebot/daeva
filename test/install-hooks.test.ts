@@ -54,6 +54,8 @@ describe('runInstallHooks (dry-run)', () => {
   it('reports ok=true when all steps succeed or are skipped', async () => {
     const result = await runInstallHooks(manifest, '/opt/fake-package', { dryRun: true });
     expect(result.ok).toBe(true);
+    expect(result.resolvedDirectories.length).toBeGreaterThan(0);
+    expect(result.templateContext.MODELS_DIR ?? result.templateContext.HOST_MODELS_DIR).toContain('whisper/models');
   });
 });
 

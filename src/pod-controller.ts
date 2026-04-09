@@ -1,4 +1,5 @@
 import { exec as execCb } from 'node:child_process';
+import { accessSync, constants } from 'node:fs';
 import { promisify } from 'node:util';
 
 import { SchedulingError } from './errors.js';
@@ -16,6 +17,18 @@ import type { HealthCheckConfig, PodLifecycleStatus, PodManifest, RpodRuntime } 
 import { sleep } from './utils.js';
 
 const exec = promisify(execCb);
+
+const normalizeShellCommand = (command: string): string => {
+  const trimmed = command.trim();
+  if (!trimmed || /\s/.test(trimmed)) return command;
+  if (!trimmed.endsWith('.sh')) return command;
+  try {
+    accessSync(trimmed, constants.X_OK);
+    return command;
+  } catch {
+    return `sh ${JSON.stringify(trimmed)}`;
+  }
+};
 
 const DEFAULT_LIFECYCLE_TIMEOUT_MS = 120_000;
 const DEFAULT_RPOD_HEALTH_TIMEOUT_MS = 30_000;
@@ -60,6 +73,7 @@ export interface ManagedPodState {
 export class PodController {
   private readonly states = new Map<string, PodRuntimeState>();
   private readonly templateCtx: TemplateContext;
+  private readonly podTemplateContexts = new Map<string, TemplateContext>();
 
   constructor(manifests: PodManifest[], options: PodControllerOptions = {}) {
     this.templateCtx = buildContext(options.templateContext ?? {});
@@ -68,9 +82,12 @@ export class PodController {
     });
   }
 
-  syncManifest(manifest: PodManifest): void {
+  syncManifest(manifest: PodManifest, templateContext?: TemplateContext): void {
     if (!this.states.has(manifest.id)) {
       this.states.set(manifest.id, { status: 'stopped', activeJobIds: new Set() });
+    }
+    if (templateContext) {
+      this.podTemplateContexts.set(manifest.id, buildContext({ ...this.templateCtx, ...templateContext }));
     }
   }
 
@@ -170,6 +187,14 @@ export class PodController {
     state.lastStoppedAt = new Date().toISOString();
   }
 
+  async activate(manifest: PodManifest, manifests: PodManifest[]): Promise<void> {
+    await this.ensureExclusive(manifest, manifests);
+  }
+
+  async swap(nextManifest: PodManifest, manifests: PodManifest[]): Promise<void> {
+    await this.ensureExclusive(nextManifest, manifests);
+  }
+
   async ensureExclusive(manifest: PodManifest, manifests: PodManifest[]): Promise<void> {
     if (!manifest.exclusivityGroup) {
       await this.start(manifest);
@@ -220,8 +245,9 @@ export class PodController {
   ): Promise<void> {
     if (!step) return;
     if (step.command) {
-      const resolvedCommand = applyTemplateToCommand(step.command, this.templateCtx) ?? step.command;
-      const resolvedEnv = applyTemplateToEnv(step.env, this.templateCtx);
+      const templateCtx = this.getTemplateContext(podId);
+      const resolvedCommand = normalizeShellCommand(applyTemplateToCommand(step.command, templateCtx) ?? step.command);
+      const resolvedEnv = applyTemplateToEnv(step.env, templateCtx);
       const timeoutMs = step.timeoutMs ?? DEFAULT_LIFECYCLE_TIMEOUT_MS;
 
       const { stdout, stderr } = await exec(resolvedCommand, {
@@ -239,6 +265,10 @@ export class PodController {
     if (step.simulatedDelayMs) {
       await sleep(step.simulatedDelayMs);
     }
+  }
+
+  private getTemplateContext(podId: string): TemplateContext {
+    return this.podTemplateContexts.get(podId) ?? this.templateCtx;
   }
 
   private async waitForHealth(manifest: PodManifest): Promise<void> {

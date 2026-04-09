@@ -150,7 +150,12 @@ const { app } = await buildApp({
   projectRoot: fixtureRoot,
   managedPackagesRoot,
   installedPackageStore,
-  runtimeInspector: fakeRuntimeInspector
+  runtimeInspector: fakeRuntimeInspector,
+  installHookOptions: {
+    dryRun: true,
+    skipPodmanSteps: true,
+    templateContext: { HOME: path.join(installRoot, 'home') }
+  }
 });
 
 afterAll(async () => {
@@ -174,6 +179,20 @@ describe('HTTP API', () => {
     expect(response.statusCode).toBe(200);
     const body = response.json();
     expect(body.aliases.map((entry: { alias: string }) => entry.alias)).toEqual(['whisper', 'comfy', 'vision']);
+  });
+
+  it('activates, swaps, and stops pods through explicit lifecycle endpoints', async () => {
+    const activate = await app.inject({ method: 'POST', url: '/pods/whisper/activate' });
+    expect(activate.statusCode).toBe(200);
+    expect(activate.json()).toEqual({ podId: 'whisper', status: 'running' });
+
+    const swap = await app.inject({ method: 'POST', url: '/pods/swap', payload: { podId: 'comfyapi' } });
+    expect(swap.statusCode).toBe(200);
+    expect(swap.json()).toEqual({ podId: 'comfyapi', status: 'running' });
+
+    const stop = await app.inject({ method: 'POST', url: '/pods/comfyapi/stop' });
+    expect(stop.statusCode).toBe(200);
+    expect(stop.json()).toEqual({ podId: 'comfyapi', status: 'stopped' });
   });
 
   it('materializes a local-file alias through POST /pods/create and exposes installed metadata', async () => {
