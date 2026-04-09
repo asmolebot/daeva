@@ -11,11 +11,14 @@
 #   --install-dir DIR Install directory (default: ~/.local/lib/daeva)
 #   --port PORT       HTTP port for the service (default: 8787)
 #   --data-dir DIR    Data directory (default: ~/.local/share/daeva)
+#   --node-bin PATH   Explicit path to node binary
+#   --npm-bin PATH    Explicit path to npm binary
 #
 # Usage examples:
 #   ./install-linux.sh
 #   ./install-linux.sh --skip-podman --skip-service
 #   ./install-linux.sh --dry-run
+#   ./install-linux.sh --node-bin ~/.local/share/fnm/current/bin/node --npm-bin ~/.local/share/fnm/current/bin/npm
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
@@ -30,6 +33,8 @@ DATA_DIR="${HOME}/.local/share/daeva"
 PORT=8787
 SERVICE_NAME="daeva"
 NODE_VERSION_REQUIRED="20"
+NODE_BIN=""
+NPM_BIN=""
 
 # ---------------------------------------------------------------------------
 # Colours
@@ -61,9 +66,11 @@ while [[ $# -gt 0 ]]; do
     --install-dir)      shift; INSTALL_DIR="$1" ;;
     --port)             shift; PORT="$1" ;;
     --data-dir)         shift; DATA_DIR="$1" ;;
+    --node-bin)         shift; NODE_BIN="$1" ;;
+    --npm-bin)          shift; NPM_BIN="$1" ;;
     --help|-h)
       echo "Usage: $0 [--skip-podman] [--skip-service] [--dry-run] [--non-interactive]"
-      echo "           [--install-dir DIR] [--port PORT] [--data-dir DIR]"
+      echo "           [--install-dir DIR] [--port PORT] [--data-dir DIR] [--node-bin PATH] [--npm-bin PATH]"
       exit 0
       ;;
     *) die "Unknown flag: $1  (use --help)" ;;
@@ -108,6 +115,65 @@ fi
 # ---------------------------------------------------------------------------
 # Node.js / npm installation
 # ---------------------------------------------------------------------------
+refresh_node_shims() {
+  hash -r
+}
+
+set_node_bins() {
+  if [[ -n "$NODE_BIN" ]]; then
+    [[ -x "$NODE_BIN" ]] || die "--node-bin is not executable: $NODE_BIN"
+    export PATH="$(dirname "$NODE_BIN"):$PATH"
+  fi
+  if [[ -n "$NPM_BIN" ]]; then
+    [[ -x "$NPM_BIN" ]] || die "--npm-bin is not executable: $NPM_BIN"
+    export PATH="$(dirname "$NPM_BIN"):$PATH"
+  fi
+  refresh_node_shims
+}
+
+try_load_fnm() {
+  local fnm_bin=""
+  if command -v fnm &>/dev/null; then
+    fnm_bin="$(command -v fnm)"
+  elif [[ -x "$HOME/.local/share/fnm/fnm" ]]; then
+    fnm_bin="$HOME/.local/share/fnm/fnm"
+  fi
+
+  [[ -n "$fnm_bin" ]] || return 1
+  info "Loading Node environment from fnm..."
+  eval "$($fnm_bin env --shell bash)"
+  refresh_node_shims
+  command -v node &>/dev/null && command -v npm &>/dev/null
+}
+
+try_load_nvm() {
+  local nvm_dir="${NVM_DIR:-$HOME/.nvm}"
+  local nvm_sh="$nvm_dir/nvm.sh"
+  [[ -s "$nvm_sh" ]] || return 1
+
+  info "Loading Node environment from nvm..."
+  # shellcheck disable=SC1090
+  source "$nvm_sh"
+  refresh_node_shims
+  if ! command -v node &>/dev/null && command -v nvm &>/dev/null; then
+    nvm use default >/dev/null 2>&1 || nvm use node >/dev/null 2>&1 || true
+    refresh_node_shims
+  fi
+  command -v node &>/dev/null && command -v npm &>/dev/null
+}
+
+resolve_node_toolchain() {
+  set_node_bins
+
+  if command -v node &>/dev/null && command -v npm &>/dev/null; then
+    return 0
+  fi
+
+  try_load_fnm && return 0
+  try_load_nvm && return 0
+  return 1
+}
+
 install_node() {
   info "Installing Node.js ${NODE_VERSION_REQUIRED}+..."
   case "${PKG_MGR}" in
@@ -139,18 +205,21 @@ install_node() {
 }
 
 ensure_node() {
-  if ! command -v node &>/dev/null; then
+  if ! resolve_node_toolchain; then
     install_node
-  else
-    local ver
-    ver="$(node -e 'process.stdout.write(process.versions.node.split(".")[0])')"
-    if [[ "${ver}" -lt "${NODE_VERSION_REQUIRED}" ]]; then
-      warn "Node.js ${ver} detected; ${NODE_VERSION_REQUIRED}+ required. Attempting upgrade..."
-      install_node
-    else
-      ok "Node.js ${ver} already installed"
-    fi
+    resolve_node_toolchain || die "Node.js/npm still not available after installation attempt."
   fi
+
+  local ver
+  ver="$(node -e 'process.stdout.write(process.versions.node.split(".")[0])')"
+  if [[ "${ver}" -lt "${NODE_VERSION_REQUIRED}" ]]; then
+    warn "Node.js ${ver} detected; ${NODE_VERSION_REQUIRED}+ required. Attempting upgrade..."
+    install_node
+    resolve_node_toolchain || die "Node.js/npm still not available after upgrade attempt."
+    ver="$(node -e 'process.stdout.write(process.versions.node.split(".")[0])')"
+  fi
+
+  ok "Node.js ${ver} already installed"
 }
 
 ensure_node
