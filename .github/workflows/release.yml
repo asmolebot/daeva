@@ -75,7 +75,7 @@ jobs:
             exit 0
           fi
           VERSION="${RELEASE_TAG#v}"
-          clawhub publish ./skills/openclaw \
+          clawhub publish ./skills/agentskill \
             --slug daeva \
             --name "Daeva" \
             --version "$VERSION" \
