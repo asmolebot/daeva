@@ -142,6 +142,7 @@ try_load_fnm() {
   [[ -n "$fnm_bin" ]] || return 1
   info "Loading Node environment from fnm..."
   eval "$($fnm_bin env --shell bash)"
+  export DAEVA_FNM_BIN="$fnm_bin"
   refresh_node_shims
   command -v node &>/dev/null && command -v npm &>/dev/null
 }
@@ -172,6 +173,28 @@ resolve_node_toolchain() {
   try_load_fnm && return 0
   try_load_nvm && return 0
   return 1
+}
+
+resolve_stable_node_exec() {
+  if [[ -n "${NODE_BIN}" ]]; then
+    printf '%s\n' "$NODE_BIN"
+    return 0
+  fi
+
+  if [[ -n "${DAEVA_FNM_BIN:-}" ]]; then
+    local fnm_dir="${FNM_DIR:-$HOME/.local/share/fnm}"
+    local fnm_current
+    fnm_current="$($DAEVA_FNM_BIN current 2>/dev/null || true)"
+    if [[ -n "$fnm_current" && "$fnm_current" != "system" ]]; then
+      local stable_node="$fnm_dir/node-versions/$fnm_current/installation/bin/node"
+      if [[ -x "$stable_node" ]]; then
+        printf '%s\n' "$stable_node"
+        return 0
+      fi
+    fi
+  fi
+
+  command -v node
 }
 
 install_node() {
@@ -291,7 +314,7 @@ if [[ "${SKIP_SERVICE}" == "false" ]]; then
   SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
   UNIT_FILE="${SYSTEMD_USER_DIR}/${SERVICE_NAME}.service"
 
-  NODE_EXEC="$(command -v node 2>/dev/null || true)"
+  NODE_EXEC="$(resolve_stable_node_exec 2>/dev/null || true)"
   [[ -n "${NODE_EXEC}" ]] || die "Unable to resolve node binary for systemd service"
 
   if command -v daeva &>/dev/null; then
