@@ -32,6 +32,8 @@ Writable runtime directories are resolved by install hooks under the package dat
 
 Bundled workflow: `workflows/text-to-image.json`
 
+Daeva uses this workflow directly when `generate-image` jobs hit the packaged `comfyapi` pod. It injects `input.prompt` into the configured node, submits `{ "prompt": <graph>, "client_id": ... }` to `/prompt`, then polls `/history/<prompt_id>` and resolves output image metadata.
+
 - `promptNodeId`: `2`
 - `promptInputName`: `text`
 - `outputNodeId`: `7`

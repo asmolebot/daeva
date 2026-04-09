@@ -1,9 +1,13 @@
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { HttpPodAdapter, backoffDelay, DEFAULT_RETRY } from '../src/adapters.js';
 import type { HttpServiceRuntime, PodManifest, JobRequest } from '../src/types.js';
 import { AppError, PodRequestError } from '../src/errors.js';
 
-const makeManifest = (overrides: Partial<HttpServiceRuntime> = {}): PodManifest => ({
+const makeManifest = (overrides: Partial<HttpServiceRuntime> = {}, manifestOverrides: Partial<PodManifest> = {}): PodManifest => ({
   id: 'test-pod',
   nickname: 'Test Pod',
   description: 'A test pod',
@@ -15,7 +19,8 @@ const makeManifest = (overrides: Partial<HttpServiceRuntime> = {}): PodManifest 
     submitPath: '/api/submit',
     method: 'POST',
     ...overrides
-  }
+  },
+  ...manifestOverrides
 });
 
 const makeRequest = (): JobRequest => ({
@@ -54,13 +59,39 @@ describe('backoffDelay', () => {
 
 describe('HttpPodAdapter', () => {
   let originalFetch: typeof globalThis.fetch;
+  let tempDir: string;
+
+  const makeComfyManifest = (workflowPath?: string): PodManifest => makeManifest(
+    {
+      baseUrl: 'http://localhost:8188',
+      submitPath: '/prompt',
+      healthPath: '/system_stats',
+      pollingIntervalMs: 10,
+      pollingTimeoutMs: 1000
+    },
+    {
+      id: 'comfyapi',
+      metadata: workflowPath
+        ? {
+            workflow: {
+              workflowPath,
+              promptNodeId: '2',
+              promptInputName: 'text',
+              outputNodeId: '7'
+            }
+          }
+        : undefined
+    }
+  );
 
   beforeEach(() => {
     originalFetch = globalThis.fetch;
+    tempDir = mkdtempSync(path.join(os.tmpdir(), 'daeva-adapters-'));
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    rmSync(tempDir, { recursive: true, force: true });
     vi.restoreAllMocks();
   });
 
@@ -167,6 +198,98 @@ describe('HttpPodAdapter', () => {
 
       expect(result.status).toBe('succeeded');
       expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('comfy workflow execution', () => {
+    it('injects prompt into workflow, posts Comfy payload, and resolves history output', async () => {
+      const workflowPath = path.join(tempDir, 'text-to-image.json');
+      writeFileSync(workflowPath, JSON.stringify({
+        '2': { inputs: { text: 'old prompt' }, class_type: 'CLIPTextEncode' },
+        '7': { inputs: { images: ['6', 0] }, class_type: 'SaveImage' }
+      }));
+
+      const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
+        const urlStr = String(url);
+        if (urlStr.endsWith('/prompt')) {
+          const payload = JSON.parse(String(init?.body)) as { prompt: Record<string, { inputs: Record<string, unknown> }>; client_id: string };
+          expect(payload.prompt['2'].inputs.text).toBe('summon a tasteful demon');
+          expect(typeof payload.client_id).toBe('string');
+          return {
+            ok: true,
+            status: 200,
+            statusText: 'OK',
+            text: async () => JSON.stringify({ prompt_id: 'prompt-123' })
+          } as Response;
+        }
+
+        if (urlStr.endsWith('/history/prompt-123')) {
+          return {
+            ok: true,
+            status: 200,
+            statusText: 'OK',
+            text: async () => JSON.stringify({
+              'prompt-123': {
+                outputs: {
+                  '7': {
+                    images: [{ filename: 'out.png', subfolder: '', type: 'output' }]
+                  }
+                }
+              }
+            })
+          } as Response;
+        }
+
+        throw new Error(`unexpected url: ${urlStr}`);
+      });
+      globalThis.fetch = fetchMock;
+
+      const adapter = new HttpPodAdapter({ retry: { maxRetries: 0 } });
+      const result = await adapter.execute(makeComfyManifest(workflowPath), {
+        type: 'generate-image',
+        input: { prompt: 'summon a tasteful demon' }
+      });
+
+      expect(result.status).toBe('succeeded');
+      expect(result.output.kind).toBe('image-generation');
+      if (result.output.kind !== 'image-generation') throw new Error('expected image-generation output');
+      expect(result.output.generatedImages?.[0]?.url).toContain('/view?filename=out.png');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('fails clearly when comfy workflow metadata is missing', async () => {
+      const adapter = new HttpPodAdapter({ retry: { maxRetries: 0 } });
+
+      await expect(adapter.execute(makeComfyManifest(), makeRequest())).rejects.toMatchObject({
+        code: 'COMFY_WORKFLOW_CONFIG_MISSING'
+      });
+    });
+
+    it('fails clearly when workflow path cannot be loaded', async () => {
+      const adapter = new HttpPodAdapter({ retry: { maxRetries: 0 } });
+
+      await expect(adapter.execute(makeComfyManifest(path.join(tempDir, 'missing.json')), makeRequest())).rejects.toMatchObject({
+        code: 'COMFY_WORKFLOW_LOAD_FAILED'
+      });
+    });
+
+    it('fails clearly when Comfy does not return prompt_id', async () => {
+      const workflowPath = path.join(tempDir, 'text-to-image.json');
+      writeFileSync(workflowPath, JSON.stringify({
+        '2': { inputs: { text: 'old prompt' }, class_type: 'CLIPTextEncode' }
+      }));
+
+      globalThis.fetch = vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: async () => JSON.stringify({ queued: true })
+      } as Response));
+
+      const adapter = new HttpPodAdapter({ retry: { maxRetries: 0 } });
+      await expect(adapter.execute(makeComfyManifest(workflowPath), makeRequest())).rejects.toMatchObject({
+        code: 'COMFY_PROMPT_ID_MISSING'
+      });
     });
   });
 

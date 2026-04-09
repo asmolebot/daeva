@@ -1,5 +1,9 @@
+import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
 import { AppError, PodRequestError } from './errors.js';
-import type { HttpServiceRuntime, JobCompletedResult, JobRequest, PodManifest, RetryConfig, RunContext } from './types.js';
+import type { ComfyWorkflowConfig, HttpServiceRuntime, JobCompletedResult, JobRequest, PodManifest, RetryConfig, RunContext } from './types.js';
 import {
   buildAdapterRequest,
   inferCapabilityForJobType,
@@ -31,6 +35,27 @@ export interface HttpPodAdapterOptions {
   requestTimeoutMs?: number;
 }
 
+type ComfyWorkflowGraph = Record<string, { inputs?: Record<string, unknown>; class_type?: string; _meta?: Record<string, unknown> }>;
+
+interface ComfySubmitResponse {
+  prompt_id?: string;
+  number?: number;
+  node_errors?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+interface ComfyHistoryImage {
+  filename?: string;
+  subfolder?: string;
+  type?: string;
+  [key: string]: unknown;
+}
+
+interface ComfyExecutionPayload {
+  prompt: ComfyWorkflowGraph;
+  client_id: string;
+}
+
 /** Compute exponential backoff delay with jitter. */
 export function backoffDelay(attempt: number, baseMs: number, maxMs: number): number {
   const exponential = baseMs * 2 ** attempt;
@@ -48,12 +73,10 @@ async function fetchWithTimeout(
 ): Promise<Response> {
   const controller = new AbortController();
 
-  // If the caller already aborted, abort immediately.
   if (contextSignal?.aborted) {
     controller.abort(contextSignal.reason);
   }
 
-  // Forward context signal abort to our controller.
   const onContextAbort = () => controller.abort(contextSignal?.reason);
   contextSignal?.addEventListener('abort', onContextAbort, { once: true });
 
@@ -67,7 +90,6 @@ async function fetchWithTimeout(
   }
 }
 
-/** Parse response body to text then attempt JSON parse. */
 async function parseResponseBody(response: Response): Promise<unknown> {
   const text = await response.text();
   try {
@@ -77,7 +99,6 @@ async function parseResponseBody(response: Response): Promise<unknown> {
   }
 }
 
-/** Determine if an error/response is retriable. */
 function isRetriable(error: unknown): boolean {
   if (error instanceof PodRequestError) {
     return error.retriable ?? false;
@@ -85,8 +106,200 @@ function isRetriable(error: unknown): boolean {
   if (error instanceof AppError) {
     return false;
   }
-  // Network errors (fetch failures, timeouts) are retriable.
   return true;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isComfyManifest(manifest: PodManifest, capability: string): boolean {
+  if (capability !== 'image-generation') return false;
+  if (manifest.runtime.kind !== 'http-service') return false;
+  if (getComfyWorkflowConfig(manifest)) return true;
+  return manifest.runtime.submitPath === '/prompt' && manifest.runtime.healthPath === '/system_stats';
+}
+
+function getComfyWorkflowConfig(manifest: PodManifest): ComfyWorkflowConfig | undefined {
+  if (!isRecord(manifest.metadata)) return undefined;
+  const workflow = isRecord(manifest.metadata.workflow) ? manifest.metadata.workflow : undefined;
+  if (!workflow) return undefined;
+
+  const promptNodeId = hasNonEmptyString(workflow.promptNodeId) ? workflow.promptNodeId : undefined;
+  if (!promptNodeId) return undefined;
+
+  return {
+    path: hasNonEmptyString(workflow.path) ? workflow.path : undefined,
+    workflowPath: hasNonEmptyString(workflow.workflowPath) ? workflow.workflowPath : undefined,
+    promptNodeId,
+    promptInputName: hasNonEmptyString(workflow.promptInputName) ? workflow.promptInputName : undefined,
+    outputNodeId: hasNonEmptyString(workflow.outputNodeId) ? workflow.outputNodeId : undefined,
+    inputImageNodeId: hasNonEmptyString(workflow.inputImageNodeId) ? workflow.inputImageNodeId : undefined,
+    inputImageInputName: hasNonEmptyString(workflow.inputImageInputName) ? workflow.inputImageInputName : undefined
+  };
+}
+
+function resolveWorkflowPath(manifest: PodManifest, workflow: ComfyWorkflowConfig): string | undefined {
+  const configuredPath = workflow.workflowPath ?? workflow.path;
+  if (!configuredPath) return undefined;
+  if (path.isAbsolute(configuredPath)) return configuredPath;
+
+  const metadata = isRecord(manifest.metadata) ? manifest.metadata : undefined;
+  const templateContext = isRecord(metadata?.resolvedTemplateContext)
+    ? metadata.resolvedTemplateContext
+    : isRecord(metadata?.templateContext)
+      ? metadata.templateContext
+      : undefined;
+  const packageDir = hasNonEmptyString(templateContext?.PACKAGE_DIR)
+    ? templateContext.PACKAGE_DIR
+    : hasNonEmptyString(metadata?.materializedPath)
+      ? String(metadata.materializedPath)
+      : undefined;
+
+  return packageDir ? path.resolve(packageDir, configuredPath) : undefined;
+}
+
+async function loadComfyWorkflow(manifest: PodManifest): Promise<{ config: ComfyWorkflowConfig; workflowPath: string; graph: ComfyWorkflowGraph }> {
+  const config = getComfyWorkflowConfig(manifest);
+  if (!config) {
+    throw new AppError(`Comfy pod ${manifest.id} is missing workflow metadata. Set metadata.workflow.workflowPath/path plus promptNodeId.`, {
+      code: 'COMFY_WORKFLOW_CONFIG_MISSING',
+      type: 'validation',
+      statusCode: 400,
+      retriable: false,
+      details: { podId: manifest.id }
+    });
+  }
+
+  const workflowPath = resolveWorkflowPath(manifest, config);
+  if (!workflowPath) {
+    throw new AppError(`Comfy pod ${manifest.id} does not expose a resolvable workflow path. Persist PACKAGE_DIR or use an absolute metadata.workflow path.`, {
+      code: 'COMFY_WORKFLOW_PATH_UNRESOLVABLE',
+      type: 'validation',
+      statusCode: 400,
+      retriable: false,
+      details: { podId: manifest.id, workflowPath: config.workflowPath ?? config.path }
+    });
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(workflowPath, 'utf8'));
+  } catch (error) {
+    throw new AppError(`Unable to load Comfy workflow for pod ${manifest.id} from ${workflowPath}`, {
+      code: 'COMFY_WORKFLOW_LOAD_FAILED',
+      type: 'validation',
+      statusCode: 400,
+      retriable: false,
+      details: { podId: manifest.id, workflowPath, cause: error instanceof Error ? error.message : String(error) }
+    });
+  }
+
+  if (!isRecord(parsed)) {
+    throw new AppError(`Comfy workflow for pod ${manifest.id} must be a JSON object graph`, {
+      code: 'COMFY_WORKFLOW_INVALID',
+      type: 'validation',
+      statusCode: 400,
+      retriable: false,
+      details: { podId: manifest.id, workflowPath }
+    });
+  }
+
+  return { config, workflowPath, graph: JSON.parse(JSON.stringify(parsed)) as ComfyWorkflowGraph };
+}
+
+function buildComfyExecutionPayload(manifest: PodManifest, request: JobRequest, loaded: { config: ComfyWorkflowConfig; workflowPath: string; graph: ComfyWorkflowGraph }): ComfyExecutionPayload {
+  const prompt = request.input.prompt;
+  if (!hasNonEmptyString(prompt)) {
+    throw new AppError('Comfy image-generation jobs require input.prompt', {
+      code: 'COMFY_PROMPT_REQUIRED',
+      type: 'validation',
+      statusCode: 400,
+      retriable: false,
+      details: { podId: manifest.id }
+    });
+  }
+
+  const promptNodeId = loaded.config.promptNodeId;
+  const promptInputName = loaded.config.promptInputName ?? 'text';
+  const promptNode = loaded.graph[promptNodeId];
+  if (!promptNode || !isRecord(promptNode.inputs)) {
+    throw new AppError(`Comfy workflow for pod ${manifest.id} is missing prompt node ${promptNodeId}`, {
+      code: 'COMFY_PROMPT_NODE_MISSING',
+      type: 'validation',
+      statusCode: 400,
+      retriable: false,
+      details: { podId: manifest.id, workflowPath: loaded.workflowPath, promptNodeId }
+    });
+  }
+
+  promptNode.inputs[promptInputName] = prompt;
+
+  return {
+    prompt: loaded.graph,
+    client_id: randomUUID()
+  };
+}
+
+function extractPromptId(parsed: unknown): string | undefined {
+  if (!isRecord(parsed)) return undefined;
+  return hasNonEmptyString(parsed.prompt_id) ? parsed.prompt_id : undefined;
+}
+
+function buildComfyOutputFiles(baseUrl: string, images: ComfyHistoryImage[]) {
+  return images.flatMap((image) => {
+    if (!hasNonEmptyString(image.filename)) return [];
+    const params = new URLSearchParams({ filename: image.filename });
+    if (hasNonEmptyString(image.subfolder)) params.set('subfolder', image.subfolder);
+    if (hasNonEmptyString(image.type)) params.set('type', image.type);
+
+    return [{
+      url: `${baseUrl}/view?${params.toString()}`,
+      filename: image.filename,
+      metadata: {
+        subfolder: image.subfolder,
+        type: image.type
+      }
+    }];
+  });
+}
+
+function extractComfyImages(historyEntry: unknown, outputNodeId?: string): ComfyHistoryImage[] {
+  if (!isRecord(historyEntry) || !isRecord(historyEntry.outputs)) return [];
+
+  const nodes = outputNodeId
+    ? [historyEntry.outputs[outputNodeId]]
+    : Object.values(historyEntry.outputs);
+
+  return nodes.flatMap((node) => {
+    if (!isRecord(node) || !Array.isArray(node.images)) return [];
+    return node.images.filter(isRecord) as ComfyHistoryImage[];
+  });
+}
+
+function isComfyHistoryPending(parsed: unknown, promptId: string): boolean {
+  if (!isRecord(parsed)) return true;
+  const record = parsed[promptId];
+  if (!record) return true;
+  if (!isRecord(record)) return false;
+  const status = isRecord(record.status) ? record.status : undefined;
+  const statusString = hasNonEmptyString(status?.status_str) ? status.status_str.toLowerCase() : undefined;
+  if (statusString && ['error', 'execution_error'].includes(statusString)) return false;
+  return !isRecord(record.outputs);
+}
+
+function buildComfyResult(runtime: HttpServiceRuntime, promptId: string, historyEntry: unknown, outputNodeId?: string): unknown {
+  const images = extractComfyImages(historyEntry, outputNodeId);
+  return {
+    prompt_id: promptId,
+    status: images.length > 0 ? 'completed' : 'completed-no-images',
+    images: buildComfyOutputFiles(runtime.baseUrl, images),
+    history: historyEntry
+  };
 }
 
 export class HttpPodAdapter implements PodAdapter {
@@ -123,24 +336,48 @@ export class HttpPodAdapter implements PodAdapter {
     const timeoutMs = runtime.requestTimeoutMs ?? this.globalTimeoutMs;
 
     try {
-      const built = await buildAdapterRequest(request);
-      const init: RequestInit = {
-        ...built,
-        method
-      };
+      let finalResponse: unknown;
+      let bodyKind: 'json' | 'form-data';
 
-      const parsed = await this.executeWithRetry(url, init, timeoutMs, retryConfig, manifest, context);
+      if (isComfyManifest(manifest, capability)) {
+        const workflow = await loadComfyWorkflow(manifest);
+        const comfyPayload = buildComfyExecutionPayload(manifest, request, workflow);
+        const parsed = await this.executeWithRetry(url, {
+          method,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(comfyPayload)
+        }, timeoutMs, retryConfig, manifest, context);
+        const promptId = extractPromptId(parsed);
+        if (!promptId) {
+          throw new AppError(`Comfy pod ${manifest.id} did not return prompt_id from /prompt`, {
+            code: 'COMFY_PROMPT_ID_MISSING',
+            type: 'pod-request',
+            statusCode: 502,
+            retriable: false,
+            details: { podId: manifest.id, response: parsed }
+          });
+        }
 
-      // If resultPath is defined, poll for async result.
-      const finalResponse = runtime.resultPath
-        ? await this.pollForResult(runtime, timeoutMs, manifest, context)
-        : parsed;
+        finalResponse = await this.pollComfyHistory(runtime, timeoutMs, manifest, promptId, workflow.config.outputNodeId, context);
+        bodyKind = 'json';
+      } else {
+        const built = await buildAdapterRequest(request);
+        const init: RequestInit = {
+          ...built,
+          method
+        };
+        const parsed = await this.executeWithRetry(url, init, timeoutMs, retryConfig, manifest, context);
+        finalResponse = runtime.resultPath
+          ? await this.pollForResult(runtime, timeoutMs, manifest, context)
+          : parsed;
+        bodyKind = built.bodyKind;
+      }
 
       return normalizeCompletedResult(manifest, request, capability, {
         acceptedAt: new Date().toISOString(),
         submitUrl: url,
         method,
-        bodyKind: built.bodyKind,
+        bodyKind,
         response: finalResponse
       });
     } catch (error) {
@@ -151,7 +388,6 @@ export class HttpPodAdapter implements PodAdapter {
     }
   }
 
-  /** Execute a fetch with retry logic and timeout. */
   private async executeWithRetry(
     url: string,
     init: RequestInit,
@@ -190,14 +426,12 @@ export class HttpPodAdapter implements PodAdapter {
       }
     }
 
-    // All retries exhausted.
     if (lastError instanceof AppError) {
       throw lastError;
     }
     throw wrapJobExecutionError(manifest, lastError);
   }
 
-  /** Poll resultPath for an async job until it returns a terminal state or times out. */
   private async pollForResult(
     runtime: HttpServiceRuntime,
     requestTimeoutMs: number,
@@ -221,14 +455,12 @@ export class HttpPodAdapter implements PodAdapter {
         const parsed = await parseResponseBody(response);
 
         if (!response.ok) {
-          // 404 or 202 means not ready yet — keep polling.
           if (response.status === 404 || response.status === 202) {
             continue;
           }
           throw wrapPodRequestError(manifest, response.status, response.statusText, parsed);
         }
 
-        // Check if the response indicates completion.
         if (isPollingComplete(parsed)) {
           return parsed;
         }
@@ -236,7 +468,6 @@ export class HttpPodAdapter implements PodAdapter {
         if (error instanceof AppError) {
           throw error;
         }
-        // Transient fetch error during polling — keep trying until deadline.
       }
     }
 
@@ -247,16 +478,65 @@ export class HttpPodAdapter implements PodAdapter {
       details: { podId: manifest.id, resultUrl, pollingTimeoutMs }
     });
   }
+
+  private async pollComfyHistory(
+    runtime: HttpServiceRuntime,
+    requestTimeoutMs: number,
+    manifest: PodManifest,
+    promptId: string,
+    outputNodeId?: string,
+    context?: RunContext
+  ): Promise<unknown> {
+    const historyUrl = `${runtime.baseUrl}/history/${encodeURIComponent(promptId)}`;
+    const intervalMs = runtime.pollingIntervalMs ?? DEFAULT_POLLING_INTERVAL_MS;
+    const pollingTimeoutMs = runtime.pollingTimeoutMs ?? DEFAULT_POLLING_TIMEOUT_MS;
+    const deadline = Date.now() + pollingTimeoutMs;
+
+    while (Date.now() < deadline) {
+      if (context?.signal?.aborted) {
+        throw new AppError('Polling aborted', { code: 'POLLING_ABORTED', type: 'job-execution', retriable: false });
+      }
+
+      await sleep(intervalMs);
+
+      try {
+        const response = await fetchWithTimeout(historyUrl, { method: 'GET' }, requestTimeoutMs, context?.signal);
+        const parsed = await parseResponseBody(response);
+
+        if (!response.ok) {
+          if (response.status === 404 || response.status === 202) {
+            continue;
+          }
+          throw wrapPodRequestError(manifest, response.status, response.statusText, parsed);
+        }
+
+        if (isComfyHistoryPending(parsed, promptId)) {
+          continue;
+        }
+
+        const historyEntry = isRecord(parsed) ? parsed[promptId] : undefined;
+        return buildComfyResult(runtime, promptId, historyEntry, outputNodeId);
+      } catch (error) {
+        if (error instanceof AppError) {
+          throw error;
+        }
+      }
+    }
+
+    throw new AppError(`Comfy history polling timed out for pod ${manifest.id} and prompt ${promptId}`, {
+      code: 'COMFY_HISTORY_TIMEOUT',
+      type: 'job-execution',
+      retriable: true,
+      details: { podId: manifest.id, promptId, historyUrl, pollingTimeoutMs }
+    });
+  }
 }
 
-/** Determine if a polled response represents a completed job. */
 function isPollingComplete(parsed: unknown): boolean {
   if (typeof parsed !== 'object' || parsed === null) {
-    // Non-object 2xx responses are considered complete.
     return true;
   }
   const record = parsed as Record<string, unknown>;
-  // Check for explicit status fields that indicate pending/running.
   if ('status' in record) {
     const status = String(record.status).toLowerCase();
     if (status === 'pending' || status === 'running' || status === 'queued' || status === 'processing') {

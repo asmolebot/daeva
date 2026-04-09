@@ -94,6 +94,9 @@ describe('comfy package contract', () => {
     expect(pkg.packageManifestPath).toContain('pod-package.json');
     expect(pkg.resolvedDirectories?.map((dir) => dir.purpose)).toContain('custom-nodes');
     expect(pkg.resolvedTemplateContext?.PACKAGE_DIR).toContain('materialized-comfyapi/comfyapi');
+    const metadata = pkg.manifest.pod.metadata as Record<string, any>;
+    expect(metadata.materializedPath).toContain('materialized-comfyapi/comfyapi');
+    expect(metadata.resolvedTemplateContext?.PACKAGE_DIR).toContain('materialized-comfyapi/comfyapi');
     expect(JSON.stringify(pkg)).not.toContain('/home/clohl/');
 
     const activeManifest = registry.get('comfyapi');

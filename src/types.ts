@@ -78,6 +78,16 @@ export interface RpodRuntime {
 
 export type PodRuntime = HttpServiceRuntime | RpodRuntime;
 
+export interface ComfyWorkflowConfig {
+  path?: string;
+  workflowPath?: string;
+  promptNodeId: string;
+  promptInputName?: string;
+  outputNodeId?: string;
+  inputImageNodeId?: string;
+  inputImageInputName?: string;
+}
+
 export interface PodManifest {
   id: string;
   nickname: string;

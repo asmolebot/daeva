@@ -201,6 +201,12 @@ const persistInstalledPackage = async (
     skipPodmanSteps: options.installHookOptions?.skipPodmanSteps ?? false
   });
 
+  manifest.pod.metadata = {
+    ...(manifest.pod.metadata ?? {}),
+    materializedPath,
+    resolvedTemplateContext: hookResult.templateContext
+  };
+
   const installedPackage: InstalledPackageMetadata = {
     alias: registryEntry.alias,
     packageName: manifest.name,

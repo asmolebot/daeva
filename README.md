@@ -88,6 +88,8 @@ export DAEVA_BASE=http://127.0.0.1:8787
 curl "$DAEVA_BASE/proxy/comfyapi/system_stats"
 ```
 
+For `comfyapi` image jobs, Daeva now submits a real Comfy workflow payload to `/prompt` and polls `/history/<prompt_id>`. Packaged Comfy manifests should provide workflow metadata with `workflowPath` (or `path`), `promptNodeId`, optional `promptInputName` (defaults to `text`), and optional `outputNodeId`.
+
 ## MCP server
 
 Daeva ships a stdio-based MCP server binary for integration with AI coding assistants:
