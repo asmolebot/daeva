@@ -48,9 +48,9 @@
   "5": {
     "inputs": {
       "seed": 42,
-      "steps": 4,
-      "cfg": 1.5,
-      "sampler_name": "euler",
+      "steps": 30,
+      "cfg": 5.0,
+      "sampler_name": "dpmpp_sde",
       "scheduler": "normal",
       "denoise": 1,
       "model": [
