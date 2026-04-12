@@ -29,9 +29,16 @@
 .PARAMETER DataDir
     Data directory. Default: $env:APPDATA\daeva
 
+.PARAMETER Host
+    HTTP listen address written to the env/service. Default: 127.0.0.1
+
+.PARAMETER SystemInstall
+    Prefer a machine-wide Windows service instead of a per-user Scheduled Task fallback.
+
 .EXAMPLE
     .\install-windows.ps1
     .\install-windows.ps1 -SkipPodman -SkipService
+    .\install-windows.ps1 -SystemInstall -Host 0.0.0.0
     .\install-windows.ps1 -DryRun
 #>
 
@@ -41,9 +48,11 @@ param(
     [switch]$SkipService,
     [switch]$DryRun,
     [switch]$NonInteractive,
+    [switch]$SystemInstall,
     [string]$InstallDir  = "$env:LOCALAPPDATA\daeva",
     [int]   $Port        = 8787,
-    [string]$DataDir     = "$env:APPDATA\daeva"
+    [string]$DataDir     = "$env:APPDATA\daeva",
+    [string]$Host        = '127.0.0.1'
 )
 
 Set-StrictMode -Version Latest
@@ -185,6 +194,7 @@ Write-Info "Writing .env to $EnvFile..."
 if (-not $DryRun) {
     @"
 PORT=$Port
+HOST=$Host
 DATA_DIR=$DataDir
 "@ | Set-Content -Encoding UTF8 $EnvFile
 }
@@ -193,10 +203,14 @@ DATA_DIR=$DataDir
 # Service setup
 # ---------------------------------------------------------------------------
 if (-not $SkipService) {
-    # Prefer NSSM if available, otherwise use Scheduled Task (user-level)
-    if (Test-Command 'nssm') {
+    $ServiceArgs = "--host $Host --port $Port --data-dir `"$DataDir`""
+
+    if ($SystemInstall -or (Test-Command 'nssm')) {
+        if (-not (Test-Command 'nssm')) {
+            Write-Fail "-SystemInstall requires NSSM in PATH (or install it first)."
+        }
         Write-Info "Installing Windows service via NSSM..."
-        Invoke-Step "nssm install '$ServiceName' '$BinPath' '--port $Port --data-dir `"$DataDir`"'"
+        Invoke-Step "nssm install '$ServiceName' '$BinPath' '$ServiceArgs'"
         Invoke-Step "nssm set '$ServiceName' AppStdout '$DataDir\logs\stdout.log'"
         Invoke-Step "nssm set '$ServiceName' AppStderr '$DataDir\logs\stderr.log'"
         Invoke-Step "nssm set '$ServiceName' Start SERVICE_AUTO_START"
@@ -210,12 +224,11 @@ if (-not $SkipService) {
         Write-Host "  nssm restart $ServiceName"
         Write-Host "  nssm remove  $ServiceName confirm"
     } else {
-        # Fallback: Scheduled Task that runs at logon (user scope, no elevation needed)
         Write-Info "NSSM not found — installing as a Scheduled Task (runs at logon)..."
 
         $TaskAction = New-ScheduledTaskAction `
             -Execute 'cmd.exe' `
-            -Argument "/c `"$BinPath`" --port $Port --data-dir `"$DataDir`" >> `"$DataDir\logs\stdout.log`" 2>&1"
+            -Argument "/c `"$BinPath`" $ServiceArgs >> `"$DataDir\logs\stdout.log`" 2>&1"
 
         $TaskTrigger  = New-ScheduledTaskTrigger -AtLogOn
         $TaskSettings = New-ScheduledTaskSettingsSet `
@@ -247,8 +260,8 @@ if (-not $SkipService) {
     Write-Info "Skipping service setup (-SkipService)"
     Write-Host ""
     Write-Host "Start manually with:" -ForegroundColor Green
-    Write-Host "  & '$BinPath' --port $Port --data-dir '$DataDir'"
+    Write-Host "  & '$BinPath' --host $Host --port $Port --data-dir '$DataDir'"
 }
 
 Write-Host ""
-Write-Ok "Installation complete. API will be available at http://127.0.0.1:$Port"
+Write-Ok "Installation complete. API will be available at http://${Host}:$Port"

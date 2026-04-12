@@ -52,6 +52,28 @@ irm https://asmo.bot/install-windows.ps1 | iex
 
 All scripts support `--dry-run`, `--skip-podman`, `--skip-service`, and more. Run with `--help` for details.
 
+### Service modes
+
+Daeva now documents two install/service modes:
+
+- **User install**: per-user background service for laptops, workstations, and dev boxes.
+- **System install**: machine-wide service for server hosts that should survive reboot without depending on an interactive user session.
+
+Recommended defaults:
+
+- **Linux desktop/dev**: default user service via `install-linux.sh`
+- **Linux server**: `install-linux.sh --system-install --service-user <user> --host 0.0.0.0`
+- **macOS desktop/dev**: default LaunchAgent via `install-macos.sh`
+- **macOS shared/server-style host**: `install-macos.sh --system-install --host 0.0.0.0`
+- **Windows desktop/dev**: default per-user Scheduled Task fallback
+- **Windows service install**: `install-windows.ps1 -SystemInstall -Host 0.0.0.0` (requires NSSM)
+
+For user-level services on Linux, unattended reboot behavior depends on the user manager being available. If the service should start without an interactive login, enable linger for the service account:
+
+```bash
+sudo loginctl enable-linger <user>
+```
+
 ### Server startup
 
 Start the server with default settings:
@@ -63,11 +85,29 @@ daeva
 
 Environment variables and CLI flags for configuration:
 
-| Env var    | CLI flag       | Default       | Description          |
-|------------|----------------|---------------|----------------------|
-| `PORT`     | `--port`       | `8787`        | HTTP listen port     |
-| `HOST`     | `--host`       | `0.0.0.0`     | HTTP listen address  |
-| `DATA_DIR` | `--data-dir`   | `.data`       | Data/storage path    |
+| Env var | CLI flag | Default | Description |
+|---|---|---|---|
+| `PORT` | `--port` | `8787` | HTTP listen port |
+| `HOST` | `--host` | `127.0.0.1` | HTTP listen address |
+| `DATA_DIR` | `--data-dir` | `.data` | Data/storage path |
+| `DAEVA_HOT_SWAP_MODE` | `--hot-swap-mode` | `false` | Keep already-running pods warm when swapping within an exclusivity group |
+| `DAEVA_AUTO_FIT_PODS` | `--auto-fit-pods` | `false` | Allow multiple same-group pods to coexist when GPU budget permits |
+| `DAEVA_GPU_CAPACITY_MB` | `--gpu-capacity-mb` | unset | GPU VRAM budget in MB used by `autoFitPods` |
+
+Installer defaults are intentionally more conservative than the bare CLI. The install scripts default to `HOST=127.0.0.1` unless you explicitly pass `--host 0.0.0.0` for LAN/server access.
+
+### Scheduler tuning
+
+These knobs are optional and off by default:
+
+- `--hot-swap-mode` / `DAEVA_HOT_SWAP_MODE=true`
+  - if the requested pod is already running, Daeva keeps sibling pods warm instead of eagerly tearing them down
+- `--auto-fit-pods` / `DAEVA_AUTO_FIT_PODS=true`
+  - allows multiple pods in the same exclusivity group to remain active when they fit inside the configured GPU budget
+- `--gpu-capacity-mb <mb>` / `DAEVA_GPU_CAPACITY_MB=<mb>`
+  - total GPU VRAM budget used by `autoFitPods`
+
+Pod manifests can declare `vramMB` to participate in `autoFitPods`. Pods without `vramMB` are treated conservatively as consuming the full GPU budget.
 
 `DATA_DIR` stores installed packages, the SQLite job database, and the installed-packages index. Set it to a persistent path when running as a service.
 
@@ -286,6 +326,38 @@ src/schemas.ts             Zod schemas for manifests + validation
 src/manifests/builtin.ts   Bundled pod definitions
 examples/                  Pod package examples
 scripts/                   Platform install scripts
+```
+
+## Installer quick reference
+
+### Linux
+
+```bash
+# Desktop/dev: per-user service on localhost
+./scripts/install-linux.sh
+
+# Server: machine-wide service, accessible on LAN
+./scripts/install-linux.sh --system-install --service-user asmo --host 0.0.0.0
+```
+
+### macOS
+
+```bash
+# Desktop/dev: LaunchAgent for current user
+./scripts/install-macos.sh
+
+# Shared/server-style host: LaunchDaemon
+./scripts/install-macos.sh --system-install --host 0.0.0.0
+```
+
+### Windows
+
+```powershell
+# Desktop/dev: default install, service/task based on available tools
+.\scripts\install-windows.ps1
+
+# System-style service install (requires NSSM)
+.\scripts\install-windows.ps1 -SystemInstall -Host 0.0.0.0
 ```
 
 ## Development

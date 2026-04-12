@@ -155,6 +155,11 @@ const { app } = await buildApp({
     dryRun: true,
     skipPodmanSteps: true,
     templateContext: { HOME: path.join(installRoot, 'home') }
+  },
+  schedulerConfig: {
+    hotSwapMode: true,
+    autoFitPods: true,
+    gpuCapacityMB: 16000
   }
 });
 
@@ -172,6 +177,17 @@ describe('HTTP API', () => {
     expect(response.statusCode).toBe(200);
     const body = response.json();
     expect(body.pods).toHaveLength(3);
+  });
+
+  it('reports scheduler config in status output', async () => {
+    const response = await app.inject({ method: 'GET', url: '/status/scheduler' });
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.config).toEqual({
+      hotSwapMode: true,
+      autoFitPods: true,
+      gpuCapacityMB: 16000
+    });
   });
 
   it('lists registry aliases', async () => {

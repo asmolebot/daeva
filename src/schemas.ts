@@ -107,6 +107,7 @@ export const podManifestSchema = z.object({
   exclusivityGroup: z.string().optional(),
   costWeight: z.number().positive().optional(),
   maxConcurrentJobs: z.number().int().positive().optional(),
+  vramMB: z.number().int().positive().optional(),
   metadata: metadataRecordSchema.optional()
 });
 
@@ -343,4 +344,17 @@ export const installedPackageMetadataSchema = z.object({
 export const installedPackageMetadataCollectionSchema = z.object({
   schemaVersion: z.literal('1'),
   packages: z.array(installedPackageMetadataSchema)
+});
+
+export const schedulerConfigSchema = z.object({
+  hotSwapMode: z.boolean().optional(),
+  autoFitPods: z.boolean().optional(),
+  gpuCapacityMB: z.number().int().positive().optional()
+}).superRefine((value, ctx) => {
+  if (value.autoFitPods && !value.gpuCapacityMB) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'gpuCapacityMB is required when autoFitPods is enabled'
+    });
+  }
 });

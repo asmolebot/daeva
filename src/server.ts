@@ -25,7 +25,7 @@ import {
   buildStatusSnapshot
 } from './status.js';
 import type { RuntimeInspector } from './runtime-inspector.js';
-import type { PodManifest, UploadedArchiveRegistrySource } from './types.js';
+import type { PodManifest, SchedulerConfig, UploadedArchiveRegistrySource } from './types.js';
 
 const DEFAULT_UPLOAD_MAX_BYTES = 50 * 1024 * 1024; // 50 MiB
 
@@ -43,6 +43,8 @@ export interface AppDependencies {
   /** Maximum upload size in bytes for multipart archive uploads (default: 50 MiB). */
   uploadMaxBytes?: number;
   installHookOptions?: { dryRun?: boolean; skipPodmanSteps?: boolean; templateContext?: Record<string, string> };
+  /** Scheduler configuration for hotSwapMode / autoFitPods. */
+  schedulerConfig?: SchedulerConfig;
 }
 
 const shouldActivateInstalledManifest = (existingManifest: PodManifest | undefined): boolean => {
@@ -56,7 +58,9 @@ const shouldActivateInstalledManifest = (existingManifest: PodManifest | undefin
 
 export const buildApp = async (dependencies: AppDependencies = {}) => {
   const registry = dependencies.registry ?? new PodRegistry();
-  const podController = dependencies.podController ?? new PodController(registry.list());
+  const podController = dependencies.podController ?? new PodController(registry.list(), {
+    schedulerConfig: dependencies.schedulerConfig
+  });
   const router = dependencies.router ?? new SchedulerRouter(registry, podController);
   const jobManager = dependencies.jobManager ?? new JobManager(registry, podController, router);
   const installedPackageStore = dependencies.installedPackageStore ?? new InstalledPackageStore();
@@ -294,11 +298,11 @@ export const buildApp = async (dependencies: AppDependencies = {}) => {
   });
 
   app.get('/status', async () =>
-    buildStatusSnapshot(registry, podController, jobManager, installedPackageStore, dependencies.runtimeInspector)
+    buildStatusSnapshot(registry, podController, jobManager, installedPackageStore, dependencies.runtimeInspector, dependencies.schedulerConfig)
   );
   app.get('/status/runtime', async () => buildRuntimeStatus(registry, podController, dependencies.runtimeInspector));
   app.get('/status/packages', async () => buildPackageStatus(registry, installedPackageStore));
-  app.get('/status/scheduler', async () => buildSchedulerStatus(registry, podController, jobManager));
+  app.get('/status/scheduler', async () => buildSchedulerStatus(registry, podController, jobManager, dependencies.schedulerConfig));
   app.get('/status/jobs/recent', async (request) => {
     const query = request.query as { limit?: string | number };
     const rawLimit = typeof query.limit === 'string' ? Number.parseInt(query.limit, 10) : query.limit;

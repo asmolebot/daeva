@@ -359,3 +359,159 @@ describe('Job Queue Position Reporting', () => {
     expect(manager.getQueuePosition('job_nonexistent')).toBeNull();
   });
 });
+
+// ── hotSwapMode Tests ─────────────────────────────────────────────────────
+
+describe('hotSwapMode', () => {
+  it('skips tearing down other pods when target is already running', async () => {
+    const podA = makePod({ id: 'pod-a', capabilities: ['image-generation'], exclusivityGroup: 'gpu-0' });
+    const podB = makePod({ id: 'pod-b', capabilities: ['speech-to-text'], exclusivityGroup: 'gpu-0' });
+    const registry = new PodRegistry([podA, podB]);
+    const controller = new PodController(registry.list(), {
+      schedulerConfig: { hotSwapMode: true }
+    });
+
+    // Start both pods manually (simulating previous use)
+    await controller.start(podA);
+    await controller.start(podB);
+    expect(controller.getStatus('pod-a')).toBe('running');
+    expect(controller.getStatus('pod-b')).toBe('running');
+
+    // ensureExclusive for pod-a: with hotSwapMode, pod-b should NOT be stopped
+    await controller.ensureExclusive(podA, [podA, podB]);
+
+    expect(controller.getStatus('pod-a')).toBe('running');
+    expect(controller.getStatus('pod-b')).toBe('running'); // preserved!
+  });
+
+  it('still swaps when the target is NOT running', async () => {
+    const podA = makePod({ id: 'pod-a', capabilities: ['image-generation'], exclusivityGroup: 'gpu-0' });
+    const podB = makePod({ id: 'pod-b', capabilities: ['speech-to-text'], exclusivityGroup: 'gpu-0' });
+    const registry = new PodRegistry([podA, podB]);
+    const controller = new PodController(registry.list(), {
+      schedulerConfig: { hotSwapMode: true }
+    });
+
+    await controller.start(podA);
+    expect(controller.getStatus('pod-a')).toBe('running');
+
+    // ensureExclusive for pod-b (not running): pod-a should be stopped
+    await controller.ensureExclusive(podB, [podA, podB]);
+
+    expect(controller.getStatus('pod-a')).toBe('stopped');
+    expect(controller.getStatus('pod-b')).toBe('running');
+  });
+
+  it('preserves default behavior when hotSwapMode is off', async () => {
+    const podA = makePod({ id: 'pod-a', capabilities: ['image-generation'], exclusivityGroup: 'gpu-0' });
+    const podB = makePod({ id: 'pod-b', capabilities: ['speech-to-text'], exclusivityGroup: 'gpu-0' });
+    const registry = new PodRegistry([podA, podB]);
+    const controller = new PodController(registry.list()); // default config
+
+    await controller.start(podA);
+    await controller.start(podB);
+
+    // Default: ensureExclusive for pod-a should stop pod-b even though pod-a is running
+    await controller.ensureExclusive(podA, [podA, podB]);
+
+    expect(controller.getStatus('pod-a')).toBe('running');
+    expect(controller.getStatus('pod-b')).toBe('stopped');
+  });
+});
+
+// ── autoFitPods Tests ─────────────────────────────────────────────────────
+
+describe('autoFitPods', () => {
+  it('allows concurrent pods when VRAM budget permits', async () => {
+    const podA = makePod({ id: 'pod-a', capabilities: ['image-generation'], exclusivityGroup: 'gpu-0', vramMB: 4000 });
+    const podB = makePod({ id: 'pod-b', capabilities: ['speech-to-text'], exclusivityGroup: 'gpu-0', vramMB: 3000 });
+    const registry = new PodRegistry([podA, podB]);
+    const controller = new PodController(registry.list(), {
+      schedulerConfig: { autoFitPods: true, gpuCapacityMB: 8000 }
+    });
+
+    await controller.start(podA);
+    expect(controller.getStatus('pod-a')).toBe('running');
+
+    // pod-b (3000 MB) should fit alongside pod-a (4000 MB) within 8000 MB budget
+    await controller.ensureExclusive(podB, [podA, podB]);
+
+    expect(controller.getStatus('pod-a')).toBe('running'); // NOT stopped
+    expect(controller.getStatus('pod-b')).toBe('running');
+  });
+
+  it('evicts idle pods when VRAM budget is exceeded', async () => {
+    const podA = makePod({ id: 'pod-a', capabilities: ['image-generation'], exclusivityGroup: 'gpu-0', vramMB: 6000 });
+    const podB = makePod({ id: 'pod-b', capabilities: ['speech-to-text'], exclusivityGroup: 'gpu-0', vramMB: 6000 });
+    const registry = new PodRegistry([podA, podB]);
+    const controller = new PodController(registry.list(), {
+      schedulerConfig: { autoFitPods: true, gpuCapacityMB: 8000 }
+    });
+
+    await controller.start(podA);
+    expect(controller.getStatus('pod-a')).toBe('running');
+
+    // pod-b (6000 MB) + pod-a (6000 MB) = 12000 > 8000 → pod-a must be evicted
+    await controller.ensureExclusive(podB, [podA, podB]);
+
+    expect(controller.getStatus('pod-a')).toBe('stopped');
+    expect(controller.getStatus('pod-b')).toBe('running');
+  });
+
+  it('evicts only the minimum number of peers needed', async () => {
+    const podA = makePod({ id: 'pod-a', capabilities: ['image-generation'], exclusivityGroup: 'gpu-0', vramMB: 2000 });
+    const podB = makePod({ id: 'pod-b', capabilities: ['speech-to-text'], exclusivityGroup: 'gpu-0', vramMB: 3000 });
+    const podC = makePod({ id: 'pod-c', capabilities: ['ocr'], exclusivityGroup: 'gpu-0', vramMB: 4000 });
+    const all = [podA, podB, podC];
+    const registry = new PodRegistry(all);
+    const controller = new PodController(registry.list(), {
+      schedulerConfig: { autoFitPods: true, gpuCapacityMB: 8000 }
+    });
+
+    // Start A (2000) and B (3000) — total 5000
+    await controller.start(podA);
+    await controller.start(podB);
+
+    // Start C (4000) — total would be 9000, over 8000. Need to free ≥1000.
+    // Evict biggest idle first: B (3000) frees enough. A should survive.
+    await controller.ensureExclusive(podC, all);
+
+    expect(controller.getStatus('pod-a')).toBe('running');
+    expect(controller.getStatus('pod-b')).toBe('stopped');
+    expect(controller.getStatus('pod-c')).toBe('running');
+  });
+
+  it('treats pods without vramMB as consuming the entire budget', async () => {
+    const podA = makePod({ id: 'pod-a', capabilities: ['image-generation'], exclusivityGroup: 'gpu-0' }); // no vramMB
+    const podB = makePod({ id: 'pod-b', capabilities: ['speech-to-text'], exclusivityGroup: 'gpu-0', vramMB: 2000 });
+    const all = [podA, podB];
+    const registry = new PodRegistry(all);
+    const controller = new PodController(registry.list(), {
+      schedulerConfig: { autoFitPods: true, gpuCapacityMB: 8000 }
+    });
+
+    await controller.start(podA);
+
+    // pod-a has no vramMB → assumed to use full 8000. pod-b can't fit.
+    await controller.ensureExclusive(podB, all);
+
+    expect(controller.getStatus('pod-a')).toBe('stopped');
+    expect(controller.getStatus('pod-b')).toBe('running');
+  });
+
+  it('falls back to strict exclusivity when autoFitPods is off', async () => {
+    const podA = makePod({ id: 'pod-a', capabilities: ['image-generation'], exclusivityGroup: 'gpu-0', vramMB: 2000 });
+    const podB = makePod({ id: 'pod-b', capabilities: ['speech-to-text'], exclusivityGroup: 'gpu-0', vramMB: 2000 });
+    const all = [podA, podB];
+    const registry = new PodRegistry(all);
+    const controller = new PodController(registry.list()); // default: autoFitPods off
+
+    await controller.start(podA);
+
+    // Even though both pods would fit in any budget, default stops all peers
+    await controller.ensureExclusive(podB, all);
+
+    expect(controller.getStatus('pod-a')).toBe('stopped');
+    expect(controller.getStatus('pod-b')).toBe('running');
+  });
+});

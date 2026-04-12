@@ -13,7 +13,7 @@ import {
   rpodStop,
   setRpodPodId
 } from './rpod-adapter.js';
-import type { HealthCheckConfig, PodLifecycleStatus, PodManifest, RpodRuntime } from './types.js';
+import type { HealthCheckConfig, PodLifecycleStatus, PodManifest, RpodRuntime, SchedulerConfig } from './types.js';
 import { sleep } from './utils.js';
 
 const exec = promisify(execCb);
@@ -57,6 +57,9 @@ export interface PodControllerOptions {
    * Useful for passing PACKAGE_DIR or per-host overrides.
    */
   templateContext?: TemplateContext;
+
+  /** Scheduler configuration for hotSwapMode / autoFitPods behavior. */
+  schedulerConfig?: SchedulerConfig;
 }
 
 export interface ManagedPodState {
@@ -74,9 +77,11 @@ export class PodController {
   private readonly states = new Map<string, PodRuntimeState>();
   private readonly templateCtx: TemplateContext;
   private readonly podTemplateContexts = new Map<string, TemplateContext>();
+  private readonly schedulerConfig: SchedulerConfig;
 
   constructor(manifests: PodManifest[], options: PodControllerOptions = {}) {
     this.templateCtx = buildContext(options.templateContext ?? {});
+    this.schedulerConfig = options.schedulerConfig ?? {};
     manifests.forEach((manifest) => {
       this.states.set(manifest.id, { status: 'stopped', activeJobIds: new Set() });
     });
@@ -208,18 +213,73 @@ export class PodController {
       return;
     }
 
-    for (const candidate of manifests) {
-      if (candidate.id === manifest.id || candidate.exclusivityGroup !== manifest.exclusivityGroup) {
-        continue;
-      }
+    const targetState = this.states.get(manifest.id);
 
+    // hotSwapMode: if the target pod is already running, skip tearing down
+    // other pods — they may be needed again soon.
+    if (this.schedulerConfig.hotSwapMode && targetState?.status === 'running') {
+      return;
+    }
+
+    // Collect idle peers in the same exclusivity group.
+    const idlePeers = manifests.filter((candidate) => {
+      if (candidate.id === manifest.id) return false;
+      if (candidate.exclusivityGroup !== manifest.exclusivityGroup) return false;
       const state = this.requireState(candidate.id);
-      if (state.status === 'running' && state.activeJobIds.size === 0) {
-        await this.stop(candidate);
+      return state.status === 'running' && state.activeJobIds.size === 0;
+    });
+
+    if (this.schedulerConfig.autoFitPods && this.schedulerConfig.gpuCapacityMB) {
+      // autoFitPods: only stop enough peers to make room for the new pod.
+      await this.evictForCapacity(manifest, idlePeers, manifests);
+    } else {
+      // Default: stop ALL idle peers in the group (strict exclusivity).
+      for (const peer of idlePeers) {
+        await this.stop(peer);
       }
     }
 
     await this.start(manifest);
+  }
+
+  /**
+   * Stop the minimum number of idle peers needed so that the incoming pod's
+   * VRAM fits within the configured budget. Pods without a declared `vramMB`
+   * are treated as consuming the entire budget (conservative fallback).
+   */
+  private async evictForCapacity(
+    incoming: PodManifest,
+    idlePeers: PodManifest[],
+    allManifests: PodManifest[]
+  ): Promise<void> {
+    const budget = this.schedulerConfig.gpuCapacityMB!;
+    const incomingVram = incoming.vramMB ?? budget;
+    const group = incoming.exclusivityGroup!;
+    const idleIds = new Set(idlePeers.map((p) => p.id));
+
+    // Sum VRAM of all running same-group pods (excluding the incoming pod).
+    let usedVram = 0;
+    for (const m of allManifests) {
+      if (m.id === incoming.id || m.exclusivityGroup !== group) continue;
+      const state = this.states.get(m.id);
+      if (state?.status !== 'running') continue;
+      usedVram += m.vramMB ?? budget;
+    }
+
+    // If there's room, no eviction needed.
+    if (usedVram + incomingVram <= budget) return;
+
+    // Sort idle peers by VRAM descending — evict the biggest hogs first.
+    const sortedPeers = [...idlePeers].sort(
+      (a, b) => (b.vramMB ?? budget) - (a.vramMB ?? budget)
+    );
+
+    let reclaimed = 0;
+    for (const peer of sortedPeers) {
+      if (usedVram - reclaimed + incomingVram <= budget) break;
+      await this.stop(peer);
+      reclaimed += peer.vramMB ?? budget;
+    }
   }
 
   markJobStarted(podId: string, jobId: string): void {

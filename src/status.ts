@@ -4,6 +4,7 @@ import type { PodRegistry } from './registry.js';
 import type { InstalledPackageStore } from './installed-package-store.js';
 import { PodmanRuntimeInspector, inferDeclaredContainerName } from './runtime-inspector.js';
 import type { RuntimeInspector } from './runtime-inspector.js';
+import type { AppDependencies } from './server.js';
 import type { JobRecord, PodManifest, PodRegistryIndexEntry } from './types.js';
 
 const defaultRuntimeInspector = new PodmanRuntimeInspector();
@@ -131,7 +132,12 @@ export const buildPackageStatus = (registry: PodRegistry, installedPackageStore:
   };
 };
 
-export const buildSchedulerStatus = (registry: PodRegistry, podController: PodController, jobManager: JobManager) => {
+export const buildSchedulerStatus = (
+  registry: PodRegistry,
+  podController: PodController,
+  jobManager: JobManager,
+  schedulerConfig: AppDependencies['schedulerConfig'] = {}
+) => {
   const manifests = registry.list();
   const runtimeStates = podController.snapshot(manifests);
   const groups = Array.from(
@@ -157,6 +163,11 @@ export const buildSchedulerStatus = (registry: PodRegistry, podController: PodCo
       queueDepth: jobManager.getQueueDepth(),
       processing: jobManager.isProcessing(),
       exclusivityGroups: groups.length
+    },
+    config: {
+      hotSwapMode: schedulerConfig?.hotSwapMode ?? false,
+      autoFitPods: schedulerConfig?.autoFitPods ?? false,
+      gpuCapacityMB: schedulerConfig?.gpuCapacityMB ?? null
     },
     exclusivity: groups
   };
@@ -196,10 +207,11 @@ export const buildStatusSnapshot = (
   podController: PodController,
   jobManager: JobManager,
   installedPackageStore: InstalledPackageStore,
-  runtimeInspector: RuntimeInspector = defaultRuntimeInspector
+  runtimeInspector: RuntimeInspector = defaultRuntimeInspector,
+  schedulerConfig: AppDependencies['schedulerConfig'] = {}
 ) => ({
   runtime: buildRuntimeStatus(registry, podController, runtimeInspector),
   packages: buildPackageStatus(registry, installedPackageStore),
-  scheduler: buildSchedulerStatus(registry, podController, jobManager),
+  scheduler: buildSchedulerStatus(registry, podController, jobManager, schedulerConfig),
   jobs: buildRecentJobStatus(jobManager)
 });

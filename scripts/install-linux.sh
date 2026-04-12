@@ -13,10 +13,14 @@
 #   --data-dir DIR    Data directory (default: ~/.local/share/daeva)
 #   --node-bin PATH   Explicit path to node binary
 #   --npm-bin PATH    Explicit path to npm binary
+#   --system-install  Install a system-wide systemd service instead of a user service
+#   --service-user U  Service account for --system-install (default: current user)
+#   --host HOST       HTTP listen address written to the env file/service (default: 127.0.0.1)
 #
 # Usage examples:
 #   ./install-linux.sh
 #   ./install-linux.sh --skip-podman --skip-service
+#   ./install-linux.sh --system-install --service-user asmo --host 0.0.0.0
 #   ./install-linux.sh --dry-run
 #   ./install-linux.sh --node-bin ~/.local/share/fnm/current/bin/node --npm-bin ~/.local/share/fnm/current/bin/npm
 set -euo pipefail
@@ -31,10 +35,13 @@ NON_INTERACTIVE=false
 INSTALL_DIR="${HOME}/.local/lib/daeva"
 DATA_DIR="${HOME}/.local/share/daeva"
 PORT=8787
+HOST="127.0.0.1"
 SERVICE_NAME="daeva"
 NODE_VERSION_REQUIRED="20"
 NODE_BIN=""
 NPM_BIN=""
+SYSTEM_INSTALL=false
+SERVICE_USER="$(id -un)"
 
 # ---------------------------------------------------------------------------
 # Colours
@@ -68,9 +75,13 @@ while [[ $# -gt 0 ]]; do
     --data-dir)         shift; DATA_DIR="$1" ;;
     --node-bin)         shift; NODE_BIN="$1" ;;
     --npm-bin)          shift; NPM_BIN="$1" ;;
+    --system-install)   SYSTEM_INSTALL=true ;;
+    --service-user)     shift; SERVICE_USER="$1" ;;
+    --host)             shift; HOST="$1" ;;
     --help|-h)
       echo "Usage: $0 [--skip-podman] [--skip-service] [--dry-run] [--non-interactive]"
       echo "           [--install-dir DIR] [--port PORT] [--data-dir DIR] [--node-bin PATH] [--npm-bin PATH]"
+      echo "           [--system-install] [--service-user USER] [--host HOST]"
       exit 0
       ;;
     *) die "Unknown flag: $1  (use --help)" ;;
@@ -338,29 +349,64 @@ run "mkdir -p '$(dirname "${ENV_FILE}")'"
 if [[ "${DRY_RUN}" == "false" ]]; then
   cat > "${ENV_FILE}" <<EOF
 PORT=${PORT}
+HOST=${HOST}
 DATA_DIR=${DATA_DIR}
 EOF
 fi
 
 # ---------------------------------------------------------------------------
-# systemd user service
+# Service installation
 # ---------------------------------------------------------------------------
 if [[ "${SKIP_SERVICE}" == "false" ]]; then
-  SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
-  UNIT_FILE="${SYSTEMD_USER_DIR}/${SERVICE_NAME}.service"
-
   NODE_EXEC="$(resolve_stable_node_exec 2>/dev/null || true)"
-  [[ -n "${NODE_EXEC}" ]] || die "Unable to resolve node binary for systemd service"
+  [[ -n "${NODE_EXEC}" ]] || die "Unable to resolve node binary for service installation"
 
   DAEVA_BIN="$(resolve_stable_daeva_exec 2>/dev/null || true)"
-  [[ -n "${DAEVA_BIN}" ]] || die "Unable to resolve daeva executable for systemd service"
+  [[ -n "${DAEVA_BIN}" ]] || die "Unable to resolve daeva executable for service installation"
 
   EXEC_START="${NODE_EXEC} ${DAEVA_BIN}"
 
-  info "Writing systemd user unit to ${UNIT_FILE}..."
-  run "mkdir -p '${SYSTEMD_USER_DIR}'"
-  if [[ "${DRY_RUN}" == "false" ]]; then
-    cat > "${UNIT_FILE}" <<EOF
+  if [[ "${SYSTEM_INSTALL}" == "true" ]]; then
+    UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+    info "Writing systemd system unit to ${UNIT_FILE}..."
+    run "sudo mkdir -p /etc/systemd/system"
+    if [[ "${DRY_RUN}" == "false" ]]; then
+      cat > /tmp/${SERVICE_NAME}.service <<EOF
+[Unit]
+Description=daeva — local GPU pod orchestrator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${SERVICE_USER}
+EnvironmentFile=${ENV_FILE}
+ExecStart=${EXEC_START} --host ${HOST} --port ${PORT} --data-dir ${DATA_DIR}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+      run "sudo mv /tmp/${SERVICE_NAME}.service '${UNIT_FILE}'"
+    fi
+
+    run "sudo systemctl daemon-reload"
+    run "sudo systemctl enable '${SERVICE_NAME}'"
+
+    ok "System service installed."
+    echo ""
+    echo -e "${GREEN}Manage the service with:${NC}"
+    echo "  sudo systemctl start ${SERVICE_NAME}"
+    echo "  sudo systemctl status ${SERVICE_NAME}"
+  else
+    SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
+    UNIT_FILE="${SYSTEMD_USER_DIR}/${SERVICE_NAME}.service"
+
+    info "Writing systemd user unit to ${UNIT_FILE}..."
+    run "mkdir -p '${SYSTEMD_USER_DIR}'"
+    if [[ "${DRY_RUN}" == "false" ]]; then
+      cat > "${UNIT_FILE}" <<EOF
 [Unit]
 Description=daeva — local GPU pod orchestrator
 After=network.target
@@ -368,28 +414,32 @@ After=network.target
 [Service]
 Type=simple
 EnvironmentFile=${ENV_FILE}
-ExecStart=${EXEC_START} --port ${PORT} --data-dir ${DATA_DIR}
+ExecStart=${EXEC_START} --host ${HOST} --port ${PORT} --data-dir ${DATA_DIR}
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=default.target
 EOF
+    fi
+
+    run "systemctl --user daemon-reload"
+    run "systemctl --user enable '${SERVICE_NAME}'"
+
+    ok "User service installed."
+    echo ""
+    echo -e "${GREEN}Manage the service with:${NC}"
+    echo "  systemctl --user start ${SERVICE_NAME}"
+    echo "  systemctl --user status ${SERVICE_NAME}"
+    echo ""
+    echo -e "${YELLOW}Tip:${NC} if this host reboots unattended, enable linger so the user service can start without an interactive login:"
+    echo "  sudo loginctl enable-linger $(id -un)"
   fi
-
-  run "systemctl --user daemon-reload"
-  run "systemctl --user enable '${SERVICE_NAME}'"
-
-  ok "Service installed."
-  echo ""
-  echo -e "${GREEN}Start the service with:${NC}"
-  echo "  systemctl --user start ${SERVICE_NAME}"
-  echo "  systemctl --user status ${SERVICE_NAME}"
 else
   info "Skipping service setup (--skip-service)"
   echo ""
   echo -e "${GREEN}Start manually with:${NC}"
-  echo "  daeva --port ${PORT} --data-dir ${DATA_DIR}"
+  echo "  daeva --host ${HOST} --port ${PORT} --data-dir ${DATA_DIR}"
 fi
 
 echo ""

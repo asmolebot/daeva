@@ -155,6 +155,12 @@ export interface PodManifest {
   costWeight?: number;
   /** Maximum concurrent jobs this pod can handle simultaneously. Default: 1. */
   maxConcurrentJobs?: number;
+  /**
+   * Declared GPU VRAM requirement in megabytes when this pod is running.
+   * Used by `autoFitPods` to decide whether multiple pods can coexist.
+   * Pods without this field are treated as consuming the entire GPU budget.
+   */
+  vramMB?: number;
   metadata?: Record<string, unknown>;
 }
 
@@ -506,6 +512,31 @@ export interface JobRecord {
   completedAt?: string;
   result?: JobCompletedResult;
   error?: JobFailureInfo;
+}
+
+export interface SchedulerConfig {
+  /**
+   * When true, keep the last-used pod alive until a different queued job
+   * actually requires a swap. If the target pod is already running,
+   * skip tearing down other pods in the same exclusivity group.
+   * Default: false (always enforce full exclusivity before each job).
+   */
+  hotSwapMode?: boolean;
+
+  /**
+   * When true, allow multiple pods in the same exclusivity group to remain
+   * active concurrently as long as the total declared VRAM fits within
+   * `gpuCapacityMB`. Pods without a `vramMB` declaration are treated as
+   * consuming the entire budget (conservative fallback).
+   * Default: false (strict one-pod-per-group exclusivity).
+   */
+  autoFitPods?: boolean;
+
+  /**
+   * Total GPU VRAM budget in megabytes. Used by `autoFitPods` to decide
+   * whether multiple pods can coexist. Ignored when `autoFitPods` is false.
+   */
+  gpuCapacityMB?: number;
 }
 
 export interface RunContext {
